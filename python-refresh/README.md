@@ -15,3 +15,5 @@
 - [ ] Model a small domain with dataclasses and a `Protocol`; compare with an ABC.
 - [ ] Add strict type checking and parametrized pytest tests.
 - [ ] Add a Hypothesis property test and explain the invariant it checks.
+
+**Environment:** See [`uv-setup.md`](../uv-setup.md) for Python setup.

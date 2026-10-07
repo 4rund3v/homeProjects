@@ -17,3 +17,5 @@
 - [ ] Visualize node roles, terms, logs, and commit indices.
 - [ ] Partition and heal the Docker network; observe quorum and catch-up.
 - [ ] Add deterministic/fuzz tests for invariants before security extensions.
+
+**Environment (Python workers):** See [`uv-setup.md`](../uv-setup.md).

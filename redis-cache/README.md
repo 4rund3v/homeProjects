@@ -15,3 +15,5 @@
 - [ ] Publish in Go and subscribe in Python; observe disconnect behavior.
 - [ ] Consume Redis Streams with a consumer group and explicit acknowledgments.
 - [ ] Compare Streams semantics with Kafka in `kafka-basics`.
+
+**Environment (Python):** See [`uv-setup.md`](../uv-setup.md).

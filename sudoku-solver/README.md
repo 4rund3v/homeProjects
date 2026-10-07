@@ -15,3 +15,5 @@
 - [ ] Implement a simple backtracking solver with known-puzzle tests.
 - [ ] Add constraint propagation and measure its effect.
 - [ ] Add property-based tests and compare heuristic choices.
+
+**Environment:** See [`uv-setup.md`](../uv-setup.md) for Python setup.

@@ -21,8 +21,19 @@ Each project README should track its scope and milestones. For each milestone, a
 - Security review of input boundaries, secrets, permissions, and failure behavior.
 - Profiling/measurement where relevant: define a workload first, capture a baseline, report resource/latency/throughput measures, and explain what the profile does and does not prove. Do not add profiling overhead to every tiny milestone just to check a box.
 - Formatting, linting, static analysis, dependency review, and CI only after the underlying behavior is understood.
+- Containerization and local CI/CD where relevant: if a project is deployable, it should eventually build as a container, run tests in a pipeline, and be deployable to the local k3s cluster. Jenkins is the recommended hands-on local CI tool because it runs locally, is free, and is widely used in enterprises. GitHub Actions or GitLab CI are acceptable alternatives. The goal is to see a local push → build → test → deploy loop; no cloud account is required.
 
-“Enterprise-level” here means high-quality design, testing, documentation, security awareness, and operational thinking at a manageable local scale. It does not mean every project needs a distributed production deployment, microservices, or a large framework.
+“Enterprise-level” here means high-quality design, testing, documentation, security awareness, operational thinking, and reproducible delivery at a manageable local scale. It does not mean every project needs a distributed production deployment, microservices, or a large framework.
+
+## Homer project dashboard
+
+The workspace will use **Homer** as a simple local landing page. It is a navigation layer, not an application framework: it lists every project, links to that project's documentation, and gains a live URL/status link when the project exposes one.
+
+- Documentation link: always present, points to the project's `README.md` or `Project.md`.
+- Application link: added only when the project actually runs an HTTP/UI surface.
+- Status link: added when the project exposes a health/status endpoint.
+- CLI/infrastructure-only projects: documentation link remains the primary entry; do not invent a web UI just to populate Homer.
+- Homer configuration belongs in a future `homer-dashboard/` directory and should be updated as projects become runnable.
 
 ## Recommended order
 
@@ -125,7 +136,9 @@ Current directories:
 17. `keycloak-setup/`
 18. `k3s-helm/`
 19. `terraform-k3s/`
-20. `packet-tracer/` (optional extension)
+**20. `packet-tracer/` (optional extension)
+
+Each project directory includes `README.md` (brief orientation) and `Project.md` (the in-depth learning specification). Python project environment setup is standardized in [`uv-setup.md`](uv-setup.md).
 
 ## Working agreement
 

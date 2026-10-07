@@ -18,3 +18,5 @@
 
 ## Tools
 - Go `crypto` and Python `hashlib`, `hmac`, `cryptography`, and `passlib`/`argon2` equivalents.
+
+**Environment (Python):** See [`uv-setup.md`](../uv-setup.md).

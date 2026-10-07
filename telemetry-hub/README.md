@@ -15,3 +15,5 @@
 - [ ] Emit structured logs and trace a request through the database call.
 - [ ] Configure a Go collector to receive and export telemetry locally.
 - [ ] Verify the end-to-end trace and document what is and is not captured.
+
+**Environment (Python):** See [`uv-setup.md`](../uv-setup.md).

@@ -15,3 +15,5 @@
 - [ ] Add PostgreSQL and exercise migrations against it.
 - [ ] Add authentication and test authorization failures.
 - [ ] Generate an OpenAPI schema and check it against observed behavior.
+
+**Environment:** See [`uv-setup.md`](../uv-setup.md). DRF dependencies are installed via `uv add django djangorestframework psycopg[binary] drf-spectacular`; test stack via `uv add --dev pytest pytest-django ruff mypy`.

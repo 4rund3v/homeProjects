@@ -15,3 +15,5 @@
 - [ ] Add a second consumer; inspect group assignment and rebalances.
 - [ ] Demonstrate duplicate delivery and make processing idempotent.
 - [ ] Measure consumer lag; optionally feed events into `telemetry-hub`.
+
+**Environment (Python consumer):** See [`uv-setup.md`](../uv-setup.md).

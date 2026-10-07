@@ -20,3 +20,5 @@
 - Go `testing`, `pprof`, `benchstat`.
 - Python `cProfile`, `pyinstrument`, `tracemalloc`, `memory_profiler`.
 - Optional OS-level `perf` where available.
+
+**Environment (Python):** See [`uv-setup.md`](../uv-setup.md).
