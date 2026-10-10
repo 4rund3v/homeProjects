@@ -15,7 +15,7 @@ func (k *KMPSearcher) String() string {
 	return fmt.Sprintf("Kmp-Searcher: Initialzied with pattern - %s", k.pattern)
 }
 
-//find all the matches for the pattern in the provided text
+// find all the matches for the pattern in the provided text
 func (k *KMPSearcher) FindAll(text []byte) []Match {
 	return nil
 }
