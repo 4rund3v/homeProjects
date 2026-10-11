@@ -67,7 +67,7 @@ The workspace uses **Homer** as a simple local landing page ([`homer-dashboard`]
 Order reflects prerequisites, conceptual progression, and algorithmic depth:
 
 ### Phase 0 — Build language fluency
-1. **`go-fundamentals`** — Types, structs, interfaces, error wrapping, `context`, goroutines/channels, `sync` primitives, table-driven tests, race detector, and benchmarks.
+1. **`go-fundamentals`** — Types, generics, generic binary heap, monotonic stack, circular ring buffer, binary search primitives, thread-safe synchronization (`atomic` vs `mutex`), concurrent worker pipeline with `context`, and benchmarks.
 2. **`python-refresh`** — Decorators, context managers, dataclasses, Protocols vs ABCs, generators, typing (`mypy --strict`), `pytest`, and `Hypothesis`.
 
 ### Phase 1 — Algorithms in Real Tools (L5 Foundations)
