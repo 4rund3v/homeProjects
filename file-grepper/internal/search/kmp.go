@@ -4,6 +4,10 @@ import (
 	"fmt"
 )
 
+func init() {
+	fmt.Println("The init from the search package is loaded.")
+}
+
 type KMPSearcher struct {
 	// the pattern to find in the raw text
 	pattern string

@@ -22,8 +22,12 @@ lint:
 
 test:
 	echo "Running unit tests for file-grepper"
-	go test 
+	go test  -v ./internal
 
 run: build
 	echo "Build Completed, Running"
 	./bin/file-grepper
+
+clean:
+	rm ./bin/file-grepper
+	go clean
