@@ -1,4 +1,5 @@
 package search
+
 import (
 	"fmt"
 	"strings"
@@ -9,7 +10,7 @@ const defaultSearchAlgo = "kmp"
 // the simple factory which returns the abstract interface for searching
 func NewSearcher(algo string, pattern string) (Searcher, error) {
 	if algo == "" {
-		return defaultSearchAlgo
+		algo = defaultSearchAlgo
 	}
 	switch strings.ToLower(algo) {
 	case "kmp":

@@ -4,6 +4,10 @@ import (
 	"fmt"
 )
 
+func init() {
+	fmt.Println("The init from the search package is loaded.")
+}
+
 type KMPSearcher struct {
 	// the pattern to find in the raw text
 	pattern string
@@ -15,7 +19,7 @@ func (k *KMPSearcher) String() string {
 	return fmt.Sprintf("Kmp-Searcher: Initialzied with pattern - %s", k.pattern)
 }
 
-//find all the matches for the pattern in the provided text
+// find all the matches for the pattern in the provided text
 func (k *KMPSearcher) FindAll(text []byte) []Match {
 	return nil
 }

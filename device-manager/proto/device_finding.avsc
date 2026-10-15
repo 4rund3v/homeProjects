@@ -1,0 +1,14 @@
+{
+  "type": "record",
+  "name": "DeviceFinding",
+  "namespace": "device_manager.avro",
+  "doc": "A single network device observation — wire format between Go and Python.",
+  "fields": [
+    {"name": "mac",        "type": "string",  "doc": "Normalized MAC (aa:bb:cc:dd:ee:ff)"},
+    {"name": "ip",         "type": ["null", "string"], "default": null, "doc": "Observed IPv4, if any"},
+    {"name": "hostname",   "type": ["null", "string"], "default": null, "doc": "mDNS/NETBIOS hostname"},
+    {"name": "vendor",     "type": ["null", "string"], "default": null, "doc": "MAC OUI vendor name"},
+    {"name": "source",     "type": "string",  "doc": "Discovery mechanism: arp|mdns|netbios"},
+    {"name": "observed_at","type": {"type": "long", "logicalType": "timestamp-millis"}, "doc": "Unix millis"}
+  ]
+}

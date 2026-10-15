@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package device_manager.v1;
+
+// DeviceTracer service — implemented by the Go binary, consumed by Python.
+service DeviceTracer {
+  // Unary: run a subnet trace, get all findings at once.
+  rpc TraceSubnet(TraceRequest) returns (TraceResponse);
+
+  // Server-streaming: findings pushed as they're discovered (future option).
+  rpc TraceSubnetStream(TraceRequest) returns (stream DeviceFinding);
+}
+
+message TraceRequest {
+  string subnet = 1;              // e.g. "192.168.1.0/24"
+  int32  timeout_seconds = 2;     // max wall-clock seconds for the scan
+}
+
+message TraceResponse {
+  repeated DeviceFinding findings = 1;
+  string  error = 2;              // empty on success
+}
+
+message DeviceFinding {
+  string mac       = 1;           // "aa:bb:cc:dd:ee:ff"
+  string ip        = 2;           // "192.168.1.42"
+  string hostname  = 3;           // "my-laptop"
+  string vendor    = 4;           // "Apple, Inc."
+  string source    = 5;           // "arp" | "mdns" | "netbios"
+  int64  observed_at = 6;         // unix millis
+}

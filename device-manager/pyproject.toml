@@ -1,0 +1,100 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "device-manager"
+version = "0.1.0"
+description = "Network device intelligence platform — Go CLI + DRF backend + React dashboard"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/device_manager"]
+
+[dependencies]
+# Web framework
+django = ">=5.0"
+djangorestframework = ">=3.14"
+django-cors-headers = ">=4.3"
+django-environ = ">=0.11"
+
+# Database
+sqlalchemy = { version = ">=2.0", extras = ["asyncio"] }
+asyncpg = ">=0.29"
+alembic = ">=1.13"
+
+# Serialization
+fastavro = ">=1.9"
+pydantic = ">=2.6"
+
+# gRPC
+grpcio = ">=1.62"
+grpcio-tools = ">=1.62"
+
+# Kafka
+aiokafka = ">=0.10"
+faust-streaming = ">=0.11"           # Python Streams (Kafka Streams equivalent)
+
+# Redis
+redis = { version = ">=5.0", extras = ["asyncio"] }
+
+# Task queue
+celery = { version = ">=5.4", extras = ["redis"] }
+
+# Observability
+ddtrace = ">=2.10"
+structlog = ">=24.1"
+
+# Dev / test
+pytest = ">=8.0"
+pytest-asyncio = ">=0.23"
+respx = ">=0.21"                     # mock httpx / requests for tests
+factory-boy = ">=3.3"
+faker = ">=24.0"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "respx",
+    "factory-boy",
+    "faker",
+    "ruff",
+    "mypy",
+    "ipython",
+]
+grpc-dev = ["grpcio-tools"]           # for `python -m grpc_tools.protoc`
+
+[project.scripts]
+device-manager = "device_manager.infrastructure_web.main:main"
+seed-vendors = "scripts.seed_vendors:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ARG"]
+ignore = ["E501"]                    # formatter handles line length
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]                # allow assert in tests
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra -q --tb=short"
+
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
