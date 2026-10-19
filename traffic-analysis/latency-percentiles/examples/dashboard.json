@@ -1,0 +1,69 @@
+# Examples: dashboard JSON (learning shape)
+
+A Grafana dashboard for this project. Import into Grafana and read each panel.
+
+```json
+{
+  "title": "shop-latency",
+  "rows": [
+    {
+      "title": "App",
+      "panels": [
+        {
+          "title": "RPS by endpoint",
+          "targets": [
+            {"expr": "sum(rate(http_request_duration_seconds_count[5m])) by (endpoint)", "refId": "A"}
+          ]
+        },
+        {
+          "title": "p50 / p95 / p99 by endpoint",
+          "targets": [
+            {"expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))", "legendFormat": "p50 {{endpoint}}"},
+            {"expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))", "legendFormat": "p95 {{endpoint}}"},
+            {"expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))", "legendFormat": "p99 {{endpoint}}"}
+          ]
+        },
+        {
+          "title": "Error ratio",
+          "targets": [
+            {"expr": "sum(rate(http_request_duration_seconds_count{status=~'5..'}[5m])) by (endpoint) / sum(rate(http_request_duration_seconds_count[5m])) by (endpoint)", "legendFormat": "5xx ratio {{endpoint}}"}
+          ]
+        }
+      ]
+    },
+    {
+      "title": "L7 (NGINX)",
+      "panels": [
+        {
+          "title": "NGINX p95 by service",
+          "targets": [
+            {"expr": "histogram_quantile(0.95, sum(rate(nginx_ingress_controller_request_duration_seconds_bucket[5m])) by (le, service, target))", "legendFormat": "{{service}} → {{target}}"}
+          ]
+        }
+      ]
+    },
+    {
+      "title": "DB",
+      "panels": [
+        {
+          "title": "pg backends",
+          "targets": [{"expr": "pg_stat_activity_numbackends", "legendFormat": "backends"}]
+        },
+        {
+          "title": "pg_stat_statements mean exec (top 10)",
+          "targets": [
+            {"expr": "topk(10, pg_stat_statements_mean_exec_time)", "legendFormat": "{{queryid}}"}
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+## What to do with it
+
+1. Import. Open. Read every panel out loud.
+2. For each panel, write the **promql** in a notes file next to the panel.
+3. Break the system (any break in `project/labs/break-the-system.md`) and predict *which panel moves first*.
+4. Check your prediction. If wrong, that is the lesson.

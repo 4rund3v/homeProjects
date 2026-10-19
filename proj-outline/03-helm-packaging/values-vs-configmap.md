@@ -48,6 +48,89 @@ The values live in one place (values.yaml). The templates scatter them to the ri
 
 ---
 
+## The top-level hierarchy you keep seeing (two tiers, four kinds)
+
+You'll open a chart and see a wall of top-level blocks — `image`, `resources`, `ingress`, `appConfig`, `serviceConfig`, `otel_config`, `database`, `redis`, `storage`, `logging`, `metrics`… Is there a standard order or menu? **No official spec.** But there is a strong, learnable convention, and it has two tiers.
+
+### Tier 1 — the "Helm-standard" blocks
+
+These describe **k8s-native plumbing** (the pod, the Service, the Ingress, the HPA) — *not* the application. They are near-identical across every mature chart (bitnami, CloudNativePG, ingress-nginx, grafana, harbor), so you'll recognize them by reflex:
+
+```
+image:            { repository, tag, pullPolicy }
+imagePullSecrets:
+replicaCount:
+revisionHistoryLimit:
+resources:        { requests, limits }
+serviceAccount:
+podSecurityContext: / securityContext:
+probes:           { liveness, readiness, startup }
+nodeSelector / tolerations / affinity
+persistence / storage
+service:          { type, port, annotations }
+ingress:          { enabled, className, hosts, tls }
+networkPolicy:
+autoscaling:      { enabled, minReplicas, maxReplicas, targetCPU... }
+```
+
+> **Why this tier feels "standard"** — it's convention by pure repetition, not by spec. Because every serious chart is laid out the same way, you can read a chart you've never seen. This tier is the one you should *copy the shape of* from a reference chart (ingress-nginx and bitnami are the best templates).
+
+### Tier 2 — app-specific blocks (your `app_config`, `otel_config`, …)
+
+These mirror **the application's own** config surface. The names are *chart-author + app-specific*: `otel_config` exists because that app exposes `OTEL_*` env vars; `database` exists because it talks to Postgres. **There is no standard for this tier — you read it off the app, not off a spec.**
+
+But even without a spec, tier-2 blocks cluster into **four recurring kinds**. That taxonomy is the real "hierarchy":
+
+| Kind | Examples | What it is |
+|---|---|---|
+| **Dependencies** — app talks *to* | `database`, `redis`, `storage`, `smtp`, `oidc`/`authentication` | external systems; values are connection details |
+| **Behavior** — what the app *does* | `appConfig`, `serviceConfig`, `featureFlags`, `limits` | the app's own feature/logic settings |
+| **Observability** | `otel_config`, `logging`, `metrics`, `tracing` | instrumentation knobs |
+| **Network/edge** — how it's reached | `ingress`, `service`, `tls`, `networkPolicy` | often merged up into tier 1 |
+
+### The rule that makes it stop feeling random
+
+> **Name tier-2 blocks after the app's own config namespaces, grouped by kind.**
+
+For your Outline chart the skeleton falls out of that rule:
+
+```yaml
+# ── Tier 1: k8s plumbing (copy shape from a reference chart) ──
+image:
+replicaCount:
+resources:
+serviceAccount:
+probes:
+persistence:
+ingress:
+networkPolicy:
+autoscaling:
+
+# ── Tier 2, kind "dependencies" ──
+database:      # doc 06
+redis:         # doc 07
+storage:       # doc 08 (MinIO / S3)
+oidc:          # doc 09 (Keycloak)
+
+# ── Tier 2, kind "behavior" ──
+app:           # PUBLIC_URL, SERVER_URL, HOSTNAME, LOCALE, …
+
+# ── Tier 2, kind "observability" ──
+otel_config:   # OTEL_* knobs (only if Outline ships them)
+logging:
+metrics:
+
+# ── Tier 2, escape hatches ──
+configMap: { extra: {} }   # the open map
+extraEnv / extraVolumes / extraLabels
+```
+
+### The key distinction (re-stated for this tier)
+
+A tier-2 block is **not** a "ConfigMap block" or a "Secret block." The *block name* tells you the app's grouping; **the template decides where it lands in k8s.** A non-sensitive `otel_config` renders into the app's ConfigMap; a sensitive one renders into a Secret; `database` *splits* — `host`/`database`/`user` go to the ConfigMap, `password` goes to the Secret. The block is the app's lens; the destination is the k8s lens.
+
+---
+
 ## What actually belongs where
 
 ### `values.yaml` — the input surface

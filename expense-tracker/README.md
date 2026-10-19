@@ -25,6 +25,9 @@ The expense tracker is the vehicle. These are the skills — each has a dedicate
 | **Records, events, cleanup, archival** | [`data-lifecycle.md`](docs/data-lifecycle.md) | Decide what lives hot, what goes cold, and when to delete |
 | **Kafka topics, retention, schemas** | [`kafka-guide.md`](docs/kafka-guide.md) + [`avro-guide.md`](docs/avro-guide.md) | Design topics, evolve schemas, and reason about delivery guarantees |
 | **Infrastructure: Terraform, k3s, Helm, edge** | [`infrastructure.md`](docs/infrastructure.md) | Provision and deploy the whole thing reproducibly |
+| **NGINX: process model → ingress → limits** | [`nginx/`](docs/nginx/) | Understand the edge; tune and debug it |
+| **TLS: handshake → certs → topology** | [`tls/`](docs/tls/) | Trust the network, and prove the certificate is right |
+| **Rate limiting: algorithms & where they live** | [`rate-limiting.md`](docs/rate-limiting.md) | Choose a limiter per situation, not one everywhere |
 
 Everything else (project layout, API contracts, phases, checkpoints) exists to
 support these. When a guide feels abstract, the phases tell you when to actually
@@ -66,21 +69,24 @@ Read in this order the first time:
 6. [`oop-principles.md`](docs/oop-principles.md) — SOLID, composition, encapsulation, and practical OO judgment
 7. [`design-patterns.md`](docs/design-patterns.md) — creational, structural, behavioral, and domain patterns
 8. [`system-design.md`](docs/system-design.md) — scale, reliability, consistency, availability, latency, and back-pressure
-8. [`system-design.md`](docs/system-design.md) — scale, reliability, consistency, availability, latency, and back-pressure
 9. [`end-to-end-flow.md`](docs/end-to-end-flow.md) — **the whole system in one walkthrough**: one expense traced through every component, with the failure matrix
 10. [`project-structure-guide.md`](docs/project-structure-guide.md) — how to decide and evolve the repo layout; no tree is prescribed
 11. [`drf-jwt-guide.md`](docs/drf-jwt-guide.md) — DRF, authentication, JWT/OAuth hands-on
 12. [`api-contracts-guide.md`](docs/api-contracts-guide.md) — how to design, generate, validate, and maintain OpenAPI contracts
-13. [`postgres-guide.md`](docs/postgres-guide.md) — modeling, tuning, and observability
-14. [`data-model.md`](docs/data-model.md) — the schema you'll converge on
-15. [`event-flows.md`](docs/event-flows.md) — Kafka flows for expense → loan updates
-16. [`kafka-guide.md`](docs/kafka-guide.md) — topics, partitions, retention, delivery
-17. [`avro-guide.md`](docs/avro-guide.md) — how to design, evolve, validate, and govern Avro `.avsc` schemas
-18. [`data-lifecycle.md`](docs/data-lifecycle.md) — records, events, cleanup, archival
-19. [`infrastructure.md`](docs/infrastructure.md) — Terraform + k3s + Helm
-20. [`observability.md`](docs/observability.md) — Datadog, Postgres, Kafka dashboards
-21. [`checkpoints.md`](docs/checkpoints.md) — stop-and-verify gates
-22. [`milestones.md`](docs/milestones.md) — the milestones to "production-shaped"
+13. [`postgres-guide.md`](docs/postgres-guide.md) — the overview: modeling, tuning, observability
+14. [`postgres/`](docs/postgres/) — **Postgres internals deep-dive** (10 docs): MVCC, storage, indexes, WAL, replication, vacuum, locking, partitioning, backup, tuning
+15. [`data-model.md`](docs/data-model.md) — the schema you'll converge on
+16. [`event-flows.md`](docs/event-flows.md) — Kafka flows for expense → loan updates
+17. [`kafka-guide.md`](docs/kafka-guide.md) — topics, partitions, retention, delivery
+18. [`avro-guide.md`](docs/avro-guide.md) — how to design, evolve, validate, and govern Avro `.avsc` schemas
+19. [`data-lifecycle.md`](docs/data-lifecycle.md) — records, events, cleanup, archival
+20. [`infrastructure.md`](docs/infrastructure.md) — Terraform + k3s + Helm
+21. [`nginx/`](docs/nginx/) — **NGINX deep-dive** (8 docs): architecture, reverse proxy, load balancing, rate limiting, ingress in k3s, caching, security, tuning
+22. [`tls/`](docs/tls/) — **TLS deep-dive** (6 docs): how-it-works, certificates, verification, TLS 1.3, this-project topology, operations
+23. [`rate-limiting.md`](docs/rate-limiting.md) — rate-limiting algorithms and where limiters live in the stack
+24. [`observability.md`](docs/observability.md) — Datadog, Postgres, Kafka dashboards
+25. [`checkpoints.md`](docs/checkpoints.md) — stop-and-verify gates
+26. [`milestones.md`](docs/milestones.md) — the milestones to "production-shaped"
 
 Then use [`design.md`](docs/design.md), [`runbooks.md`](docs/runbooks.md), and
 [`glossary.md`](docs/glossary.md) as references while you build.

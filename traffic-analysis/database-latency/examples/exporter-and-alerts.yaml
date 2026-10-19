@@ -1,0 +1,98 @@
+# Examples: exporter + alert config
+
+## postgres-exporter
+
+The exporter runs as a sidecar on the PG pod. It scrapes `pg_stat_statements`, `pg_stat_activity`, `pg_stat_replication`, and `pg_stat_wal_receiver`.
+
+```yaml
+# helm values for the exporter
+image:
+  repository: prometheuscommunity/postgres-exporter
+  tag: v0.65.0
+env:
+  - name: DATA_SOURCE_URI
+    valueFrom:
+      secretKeyRef: { name: shop-db, key: DSN }
+  - name: EXPOSE_PG_STAT_STATEMENTS
+    value: "true"
+  - name: EXPOSE_PG_STAT_ACTIVITY
+    value: "true"
+  - name: EXPOSE_PG_STAT_REPL
+    value: "true"
+  - name: TOP_QUERIES
+    value: "20"          # cardinality guard
+  - name: PGSTATSSTATSTATEMENTS_QUERYPLANMAXCALLS
+    value: "10000"
+service:
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9187"
+```
+
+The `TOP_QUERIES=20` is the cardinality guard. Without it, a busy service exports thousands of `queryid` series and the Prometheus series count doubles.
+
+## Alerts
+
+```yaml
+groups:
+- name: postgres-saturation
+  rules:
+  - record: pg_stat_activity:backends
+    expr: pg_stat_activity_numbackends
+  - alert: PgConnSaturation
+    expr: pg_stat_activity:backends / 100 > 0.8
+    for: 5m
+    labels: { severity: warning }
+    annotations:
+      summary: "DB connections at 80% of max"
+      description: "Check the app pool. poolMaxConns must be < pg_max_connections with headroom."
+
+  - record: pg_stat_activity:lock_waits
+    expr: count(pg_stat_activity_wait_events{wait_event="Lock"})
+  - alert: PgLockWaits
+    expr: pg_stat_activity:lock_waits > 0
+    for: 1m
+    labels: { severity: warning }
+    annotations:
+      summary: "Lock waits on the DB"
+      description: "pg_locks shows the granting session. Read the wait_event, not the mean."
+
+  - record: pg_stat_statements:slow_queries
+    expr: count(pg_stat_statements_mean_exec_time > 0.2)
+  - alert: PgSlowQueries
+    expr: pg_stat_statements:slow_queries > 0
+    for: 10m
+    labels: { severity: warning }
+    annotations:
+      summary: "Queries above the 200 ms slow threshold"
+      description: "Topk(10, pg_stat_statements_mean_exec_time) shows which. Count-based, not mean-based."
+
+  - record: pg_replication:lag_bytes
+    expr: pg_stat_wal_receiver_wal_bytes_received - pg_stat_wal_receiver_wal_bytes_replayed
+  - alert: PgReplicationLag
+    expr: pg_replication:lag_bytes > 10_000_000
+    for: 5m
+    labels: { severity: critical }
+    annotations:
+      summary: "Replica WAL lag > 10 MB"
+      description: "The replica is N seconds behind. Reads on the replica are stale."
+```
+
+## The dashboard panel
+
+```json
+{
+  "title": "DB: top 10 slow queries",
+  "targets": [
+    {"expr": "topk(10, pg_stat_statements_mean_exec_time)", "legendFormat": "{{queryid}}"}
+  ]
+}
+{
+  "title": "DB: lock waits (count)",
+  "targets": [
+    {"expr": "count(pg_stat_activity_wait_events{wait_event=\"Lock\"})", "legendFormat": "lock waits"}
+  ]
+}
+```
+
+The `topk` panel is *shaping* (which queries to look at). The `count` alert is *triage* (is anything above threshold *right now*). Use both, not one.

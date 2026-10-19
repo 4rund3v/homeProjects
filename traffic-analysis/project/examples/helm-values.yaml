@@ -1,0 +1,133 @@
+# Reference: Helm values snippets
+
+## MetalLB
+
+```yaml
+# metallb-values.yaml
+replicaCount: 2
+configs:
+  configItems:
+    ipPool: |
+      - name: default-pool
+        protocol: layer2
+        addresses:
+          - 192.168.50.100-192.168.50.199
+```
+
+## NGINX Ingress
+
+```yaml
+# ingress-nginx-values.yaml
+controller:
+  replicaCount: 2
+  service:
+    type: LoadBalancer        # MetalLB fills the VIP
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "10254"
+  metrics:
+    enabled: true             # nginx-exporter sidecar, not the controller's own :10254
+  ingressClassResource:
+    enabled: true
+```
+
+## Postgres
+
+```yaml
+# bitnami-postgresql-values.yaml
+primary:
+  architecture: standalone
+  pgHbaConfiguration: "host all all 0.0.0.0/0 scram-sha-256"
+  existingExtensions: "pg_stat_statements"
+  volumePermissions:
+    enabled: true
+  persistence:
+    size: 10Gi
+    storageClass: standard
+  metrics:
+    enabled: true            # postgres-exporter sidecar
+    service:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9187"
+```
+
+## Prometheus
+
+```yaml
+# prometheus-values.yaml
+prometheusSpec:
+  evaluationInterval: 15s
+  ruleEvaluationInterval: "15s"
+  retention: 15d
+  scrapeConfig:
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+  serviceMonitorSelectorNilUsesHonorLabels: true
+grafana:
+  adminUser: admin
+  adminPassword: changeme
+  sidecar:
+    dashboards:
+      enabled: true
+```
+
+## Registry
+
+A plain Deployment is enough for learning:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: registry, namespace: artifacts }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: registry } }
+  template:
+    metadata: { labels: { app: registry } }
+    spec:
+      containers:
+      - name: registry
+        image: registry:2
+        ports: [{containerPort: 5000}]
+        volumeMounts:
+        - { name: data, mountPath: /var/lib/registry }
+      volumes:
+      - name: data
+        persistentVolumeClaim: { claimName: registry-data }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: registry, namespace: artifacts }
+spec:
+  type: NodePort
+  selector: { app: registry }
+  ports:
+  - { port: 5000, targetPort: 5000, nodePort: 31500 }
+```
+
+## Ingress for the app
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shop
+  namespace: shop
+  annotations:
+    nginx.ingress.kubernetes.io/enable-csv-log-format: "true"
+    nginx.ingress.kubernetes.io/metric-bandwidth-class: "medium"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: shop.local
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service: { name: shop-api, port: { number: 8080 } }
+```
+
+The `enable-csv-log-format` annotation is what makes the L7-vs-L4 latency comparison lab possible — it emits one CSV line per request, and you can grep it for 5xx and duration.

@@ -1,0 +1,68 @@
+# Examples: alert rules for the observability topic
+
+```yaml
+groups:
+- name: cardinality
+  rules:
+  - record: series_count:by_metric
+    expr: count by (__name__) ({__name__=~".+"})
+  - alert: PrometheusSeriesCardinality
+    expr: series_count:by_metric > 10000
+    for: 10m
+    labels: { severity: warning }
+    annotations:
+      summary: "{{ $labels.__name__ }} has > 10000 series"
+      description: "topk(10, count by (<suspect_label>) ({{ $labels.__name__ }})) finds the label that exploded."
+
+- name: slo-burn
+  rules:
+  - record: sli:5m
+    expr: sum(rate(http_requests_good[5m])) / sum(rate(http_requests_total[5m]))
+  - record: sli:1h
+    expr: sum(rate(http_requests_good[1h])) / sum(rate(http_requests_total[1h]))
+  - record: sli:6h
+    expr: sum(rate(http_requests_good[6h])) / sum(rate(http_requests_total[6h]))
+  - record: sli:3d
+    expr: sum(rate(http_requests_good[3d])) / sum(rate(http_requests_total[3d]))
+
+  - alert: SloBurnFast
+    expr: (1 - (sli:5m / sli:1h)) > 14.4 * (1 - 0.995)
+    for: 2m
+    labels: { severity: critical }
+    annotations:
+      summary: "Fast SLO burn: budget consumed at >14.4x rate"
+      description: "sli[5m]={{ $value | printf \"%.3f\" }}. Page a human."
+
+  - alert: SloBurnSlow
+    expr: (1 - (sli:6h / sli:3d)) > 6 * (1 - 0.995)
+    for: 30m
+    labels: { severity: warning }
+    annotations:
+      summary: "Slow SLO burn: on pace to miss the 30-day target"
+      description: "Ticket, not a page. sli[6h]={{ $value | printf \"%.3f\" }}."
+```
+
+`http_requests_good` is the recorded SLI numerator: requests that are 2xx **and** under the duration threshold. Define it as:
+
+```
+record: http_requests_good:rate5m
+expr: sum(rate(http_request_duration_seconds_count{status=~"2.."}[5m])) by (endpoint)
+     # intersected with duration < threshold, via histogram bucket:
+     - sum(rate(http_request_duration_seconds_bucket{status=~"2..", le="0.3"}[5m])) by (endpoint)
+```
+
+The exact form depends on how the app exports the histogram (with or without a `status` label). The shape is: good = 2xx **and** in the SLO-duration bucket.
+
+## The dashboard panel
+
+```json
+{
+  "title": "SLO burn (fast / slow)",
+  "targets": [
+    {"expr": "(1 - (sli:5m / sli:1h)) / (14.4 * (1 - 0.995))", "legendFormat": "fast burn ratio (alert at 1.0)"},
+    {"expr": "(1 - (sli:6h / sli:3d)) / (6 * (1 - 0.995))", "legendFormat": "slow burn ratio (alert at 1.0)"}
+  ]
+}
+```
+
+The panel is a *ratio* of the burn rate to the alert threshold. 1.0 is the line. Above 1.0, the alert is firing. The shape of the line (flat at 0.2, then a step to 1.5) tells you *when* the burn started.

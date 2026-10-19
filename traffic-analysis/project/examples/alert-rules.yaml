@@ -1,0 +1,75 @@
+# Reference: alert rules
+
+Not production-grade. Learning-shape only.
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shop-alerts
+  namespace: observability
+  labels:
+    role: alert-rules
+spec:
+  groups:
+  - name: app
+    rules:
+    - record: http_request_duration_seconds:p95:rate5m
+      expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))
+    - record: http_request_duration_seconds:p99:rate5m
+      expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))
+    - record: http_requests:rate5m
+      expr: sum(rate(http_request_duration_seconds_count[5m])) by (endpoint)
+    - record: http_errors:ratio5m
+      expr: sum(rate(http_request_duration_seconds_count{status=~"5.."}[5m])) by (endpoint)
+         / sum(rate(http_request_duration_seconds_count[5m])) by (endpoint)
+
+  - name: app-slos
+    rules:
+    - alert: AppP99High
+      expr: http_request_duration_seconds:p99:rate5m > 1
+      for: 5m
+      labels: { severity: warning }
+      annotations:
+        summary: "p99 > 1s for 5m"
+        description: "One endpoint or all? Check `endpoint` label. DB? Check pg_stat_statements."
+    - alert: AppErrorRateHigh
+      expr: http_errors:ratio5m > 0.01
+      for: 2m
+      labels: { severity: critical }
+
+  - name: postgres
+    rules:
+    - record: pg_stat_activity:backends
+      expr: pg_stat_activity_numbackends
+    - record: pg_stat_statements:mean_exec_time
+      expr: pg_stat_statements_mean_exec_time
+    - alert: PgConnSaturation
+      expr: pg_stat_activity:backends / 100 > 0.8
+      for: 5m
+      labels: { severity: warning }
+    - alert: PgSlowQueries
+      expr: sum(rate(pg_stat_statements_calls[5m]) * on(queryid) group_left pg_stat_statements_mean_exec_time > 0.5) > 0
+      for: 10m
+      labels: { severity: warning }
+
+  - name: nginx-l7
+    rules:
+    - record: nginx_request_duration:p95:rate5m
+      expr: histogram_quantile(0.95, sum(rate(nginx_ingress_controller_request_duration_seconds_bucket[5m])) by (le, ingress, service, target))
+    - alert: NginxP95High
+      expr: nginx_request_duration:p95:rate5m > 0.5
+      for: 5m
+      labels: { severity: warning }
+    - alert: Nginx5xx
+      expr: sum(rate(nginx_ingress_controller_status_code[5m]) or on() vector(0)) > 0
+      for: 2m
+      labels: { severity: critical }
+```
+
+## What a senior engineer reads out of these rules
+
+- **Record before alert.** The `record` rules precompute p95/p99/error-rate. The alert rules are one-line comparisons. This is the pattern that keeps dashboards and alerts consistent.
+- **`for: 5m` on p99, `for: 2m` on 5xx.** Slow-latency alerts need a longer window (spikes are normal); error-rate alerts fire fast (they are not normal).
+- **No alert on `pg_stat_statements_mean_exec_time` alone.** Mean can look fine while p99 is a disaster. Alert on a *count* of slow queries, not a mean.
+- **The nginx 5xx rule is a placeholder.** The real rule in production is on `nginx_ingress_controller_response_size` and `nginx_ingress_controller_upstream_response_time` — see `load-balancing/04`.
