@@ -4,6 +4,12 @@
 > **observability**. Plus the operational pieces that show up later: connection
 > pooling (PgBouncer), archival, and cleanup. No code — concepts, decisions, and
 > exercises.
+>
+> **This is the overview. The internals live in [`postgres/`](postgres/).**
+> When a section below says "how it actually works," that's the
+> [`postgres/`](postgres/) folder: MVCC, storage, indexes, WAL, replication,
+> vacuum/bloat, locking, partitioning, backup/restore, and tuning/observability —
+> each a deep-dive doc with diagrams and interview angles.
 
 ---
 

@@ -164,6 +164,15 @@ Helm is **templated Kubernetes manifests** with versioning and values.
 
 ## 5. Edge — Tailscale + NGINX
 
+> **The deep dives live in their own folders now.** This section is the model and the
+> decisions; the mechanism, tuning, and hands-on are in:
+> [`nginx/`](nginx/) (architecture → reverse proxy → load balancing → rate limiting →
+> ingress-in-k3s → caching → security → tuning) and
+> [`tls/`](tls/) (how-it-works → certificates/PKI → verification → TLS 1.3 →
+> this-project-topology → operational → the hands-on
+> [mTLS + cert-generation lab](tls/mtls-and-cert-generation.md)).
+> Also: [`rate-limiting.md`](rate-limiting.md) for the algorithms behind the limiter.
+
 Two layers of "who can reach this and how."
 
 ### Tailscale (network access)
@@ -176,12 +185,17 @@ at the network layer.
 The ingress controller is the front door *inside* the cluster. Configure:
 
 - **TLS termination** — HTTPS at the edge (Tailscale gives you a private cert, or you
-  manage your own). Terminate TLS at the ingress, plain HTTP to services inside.
+  manage your own). Terminate TLS at the ingress, plain HTTP to services inside. The
+  full decision on which cert strategy fits this topology is in
+  [`tls/this-project-topology.md`](tls/this-project-topology.md); the actual generation
+  and Go verification are in [`tls/mtls-and-cert-generation.md`](tls/mtls-and-cert-generation.md).
 - **Load balancing** — distribute across API replicas. NGINX does this by default;
   tune the algorithm if needed.
 - **Rate limiting** — protect against abuse/brute force. This is **per-IP, coarse**
   and complements DRF's per-user throttling ([`drf-jwt-guide.md`](drf-jwt-guide.md)
-  §6). Use both: NGINX at the edge, DRF at the app.
+  §6). Use both: NGINX at the edge, DRF at the app. The algorithms and where each
+  layer fits are in [`rate-limiting.md`](rate-limiting.md); NGINX-specific config is
+  in [`nginx/rate-limiting.md`](nginx/rate-limiting.md).
 - **Routing** — `/api/*` → the API service; `/` → the static UI; `/metrics` →
   observability (restricted).
 - **Headers & security** — security headers, request size limits, timeouts.

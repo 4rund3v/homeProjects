@@ -26,7 +26,7 @@ The expense tracker is the vehicle. These are the skills — each has a dedicate
 | **Kafka topics, retention, schemas** | [`kafka-guide.md`](docs/kafka-guide.md) + [`avro-guide.md`](docs/avro-guide.md) | Design topics, evolve schemas, and reason about delivery guarantees |
 | **Infrastructure: Terraform, k3s, Helm, edge** | [`infrastructure.md`](docs/infrastructure.md) | Provision and deploy the whole thing reproducibly |
 | **NGINX: process model → ingress → limits** | [`nginx/`](docs/nginx/) | Understand the edge; tune and debug it |
-| **TLS: handshake → certs → topology** | [`tls/`](docs/tls/) | Trust the network, and prove the certificate is right |
+| **TLS: handshake → certs → mTLS → Go** | [`tls/`](docs/tls/) — plus the hands-on lab [`tls/mtls-and-cert-generation.md`](docs/tls/mtls-and-cert-generation.md) | Trust the network, prove the cert is right, and verify it all in Go |
 | **Rate limiting: algorithms & where they live** | [`rate-limiting.md`](docs/rate-limiting.md) | Choose a limiter per situation, not one everywhere |
 
 Everything else (project layout, API contracts, phases, checkpoints) exists to

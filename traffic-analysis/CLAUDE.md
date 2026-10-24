@@ -42,7 +42,7 @@ Topology (single diagram, repeated in every topic doc):
 
 - `project/` — the system: architecture, how to deploy it, what to observe first. Start here.
 - `latency-percentiles/` — p50/p95/p99/p999, histogram vs summary, sampling bias, SLOs, `histogram_quantile`.
-- `load-balancing/` — L4 (TCP, LVS, iptables, MetalLB) vs L7 (HTTP, nginx, Envoy, service mesh), health checks, session affinity, connection drain.
+- `load-balancing/` — OSI layer map (`06-osi-layers`: why only L4/L7 have LBs, L5/L6 folded into L7), L4 (TCP, LVS, iptables, MetalLB) vs L7 (HTTP, nginx, Envoy, service mesh), health checks, session affinity, connection drain.
 - `database-latency/` — connection pool metrics, query latency percentiles, replication lag, lock waits, `pg_stat_statements` interpretation, slow-query thresholds.
 - `observability/` — metrics vs logs vs traces, cardinality, RED/USE, alerting on SLOs, `histogram_quantile` math.
 - `capacity/` — load testing methodology, Little's law, queueing intuition, saturation curves.

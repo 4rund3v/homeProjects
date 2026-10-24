@@ -4,6 +4,12 @@
 > specific signals for Postgres, Kafka, and the app. Includes the charts you asked
 > for (Kafka streams, ingress, latency, egress) and answers the Datadog-locally
 > question.
+>
+> **Related deep-dive folders:** Postgres internals
+> ([`postgres/tuning-and-observability.md`](postgres/tuning-and-observability.md))
+> and NGINX/edge metrics
+> ([`nginx/tuning-and-observability.md`](nginx/tuning-and-observability.md))
+> cover the same signal types from the "how it actually works" angle.
 
 ---
 

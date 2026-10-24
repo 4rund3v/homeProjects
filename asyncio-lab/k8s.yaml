@@ -1,0 +1,40 @@
+# docs/05: the Service exposes the tool + a readiness probe.
+# Single replica on purpose — the pool is in-process. Scaling out is a
+# "central coordinator fans work across pods" problem (docs/05).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dupfind
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: dupfind }
+  template:
+    metadata:
+      labels: { app: dupfind }
+    spec:
+      containers:
+        - name: dupfind
+          image: dupfind:0.1.0
+          args: ["--serve", "--port", "8080"]
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 10
+          # The pool's max_workers must respect limits.cpu (docs/05, capacity/01):
+          # 8 workers on a 2-core limit is oversubscription.
+          resources:
+            limits:
+              cpu: "4"
+              memory: "2Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dupfind
+spec:
+  selector: { app: dupfind }
+  ports:
+    - port: 8080
+      targetPort: 8080

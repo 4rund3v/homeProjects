@@ -12,12 +12,14 @@
 
 | File | What it covers | Read when |
 |------|----------------|-----------|
+| [`mtls-and-cert-generation.md`](mtls-and-cert-generation.md) | **Hands-on lab first**: build a root/intermediate/leaf chain with `openssl`, do mTLS, then the whole thing in Go — `x509`, `crypto/tls`, `CreateCertificate` | Before `certificates-and-pki.md` if you want the hands; after it if you'd rather theory-first |
 | [`how-it-works.md`](how-it-works.md) | The three problems TLS solves; asymmetric-then-symmetric; full TLS 1.3 handshake; ECDHE & PFS; HKDF key schedule; cipher suites decoded; AEAD; the record protocol | Before everything else. The interview answer. |
 | [`certificates-and-pki.md`](certificates-and-pki.md) | What a cert is, SAN vs CN, the chain of trust, X.509, self-signed vs CA-signed, ACME (HTTP-01 vs DNS-01), key types, where private keys live | When you need to *get* or *inspect* a cert |
 | [`verification-and-testing.md`](verification-and-testing.md) | `openssl s_client`, reading cert output, checking expiry, enumerating suites (`sslscan`/`testssl.sh`), a reviewer checklist | Before sign-off / when something's broken |
 | [`tls-1.3.md`](tls-1.3.md) | The 1.2→1.3 delta: 1-RTT, mandatory PFS, what was removed, the new key schedule, PSK/resumption, 0-RTT risk; QUIC/HTTP3 as "what's next" | When someone says "TLS 1.3" |
 | [`this-project-topology.md`](this-project-topology.md) | The two encryption layers (Tailscale/WireGuard vs TLS), where to terminate, which cert strategy to use, what to record in `design.md` | When deploying or reviewing the edge |
 | [`operational.md`](operational.md) | Cert nearing expiry, renewal, chain ordering, key rotation, ACME rate limits, why TLS even on a private network | When running it in anger |
+| [`mtls-and-cert-generation.md`](mtls-and-cert-generation.md) | **Hands-on lab**: build a CA + leaf with openssl, verify chains, do mTLS, then the same end-to-end in Go (`x509`, `crypto/tls`, `CreateCertificate`) | When you want to generate/verify certs and speak Go |
 
 ## Suggested reading order
 
