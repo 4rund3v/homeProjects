@@ -108,7 +108,21 @@ uv run dupfind /data          # the CLI (local)
 uv run dupfind --serve        # the service (the container entrypoint)
 kubectl get svc dupfind       # the Service
 curl localhost:8080/healthz   # the probe
-curl -XPOST localhost:8080/scan -d '{"dir":"/data"}'   # the scan
+curl -XPOST localhost:8080/scan -d '{"dirs":["/data"]}'   # the scan (note: "dirs", a list)
 ```
 
 *The last line is the whole point: the same concurrency work (stages 1-4) is now triggered over HTTP, behind a probe, in a container, in a cluster.* *Nothing about the async code changed — only the delivery surface did.* *That separation ("concurrency logic" vs "delivery") is the senior read this folder ends on.*
+
+## What is actually verified, on a box with no docker/kubectl
+
+So the reader knows which layer of the delivery path is *proven* vs *written-but-untested*:
+
+| Layer | Verified? | How |
+|---|---|---|
+| `uv lock` → `uv sync` → `uv run dupfind` | **yes** | ran it; the installed entrypoint finds the dup group |
+| `--serve` + `GET /healthz` + `POST /scan` | **yes** | ran it locally; clean JSON on both endpoints, 400 on bad input |
+| the concurrency invariant (output independent of worker count) | **yes** | `tests/test_invariant.py` passes at cap=1 and cap=8 |
+| `Dockerfile` build | **no** | no docker here. Written to `python:3.11-slim` + `uv sync --frozen`; *build it where docker exists* |
+| `k8s.yaml` deploy | **no** | no kubectl/k3s here. The *manifest* is conventional; *the readiness probe* is the thing to check first on a real cluster |
+
+*The honest line:* **the async code and the HTTP surface are proven; the container and the cluster are *designed*, not *verified*.** That split is itself the lesson — the concurrency logic is *portable* and *testable* without a cluster, and the *delivery* is a *separate* concern you attach at the edge.

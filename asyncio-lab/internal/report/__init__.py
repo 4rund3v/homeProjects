@@ -67,7 +67,7 @@ def serve_http(default_dirs: list[str], port: int, cap_value: int) -> int:
 
         def do_GET(self):
             if self.path == "/healthz":
-                self._send(200, json.dumps({"ok": True, "workers": pool._max_workers}))
+                self._send(200, {"ok": True, "workers": pool._max_workers})
             else:
                 self._send(404, {})
 
