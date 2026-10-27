@@ -100,7 +100,7 @@ GET /<realm>/.well-known/jwks.json
 | **Revocable?** | **By *exp only** (stateless, no *central* *state) | **By *the IdP* (it *knows* *all of them)** |
 | **Carries** | the claims (authz data, 05) | *just* *an opaque ID* (`jti`) to *the refresh grant* |
 | **Held in** | *the API call* (Authorization: Bearer) | *the session* (a *httpOnly* cookie / a store), never *sent to the *API as *a Bearer |
-| **Job** | *"I'm *here now, *do the thing"* | *"Give me a *new access token *without* *re-auth"* |
+| **Job** | *"I'm *here now, *do the thing"* | *"Give me a *new access token without *re-auth"* |
 
 *The mechanism that *makes refresh *tokens *a theft-detector (the *L6* *detail, 00's *panel* *question):**
 - *On a refresh, the client sends the **old* refresh token; the IdP* ***issues a new refresh token AND *invalidates the old one in the same step — a *rotation, not a re-issue. **Each refresh token is **usable exactly once.**
