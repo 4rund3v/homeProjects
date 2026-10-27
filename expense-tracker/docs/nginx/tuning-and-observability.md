@@ -3,7 +3,7 @@
 > Worker counts, file-descriptor math, socket tuning, and the metrics that actually
 > tell you what's happening at the edge. `docs/observability.md` §6 has a light
 > version of the metrics list — this goes deeper on *what each metric means* and *what
-, what to do when it moves.*
+what to do when it moves.*
 
 ---
 

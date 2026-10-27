@@ -35,7 +35,8 @@ grpcio-tools = ">=1.62"
 
 # Kafka
 aiokafka = ">=0.10"
-faust-streaming = ">=0.11"           # Python Streams (Kafka Streams equivalent)
+faust = ">=1.0"                     # Python port of Kafka Streams (windowing, state stores)
+confluent-kafka = ">=2.3"           # librdkafka bindings — used by the producer and Faust
 
 # Redis
 redis = { version = ">=5.0", extras = ["asyncio"] }

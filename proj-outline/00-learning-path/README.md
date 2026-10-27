@@ -46,6 +46,20 @@ Think of the whole thing as a stack. Each layer depends on the one below it. Whe
 
 **Read it bottom-up to understand dependencies. Read it top-down to debug.**
 
+Above the build-and-operate layers (01–16) sits a **senior/leadership layer** — not a step you build, but a lens you apply while building:
+
+```
+17. System design       tradeoff reasoning, CAP, partitioning, ADRs
+18. Service mesh        service-to-service mTLS, identity, traffic policy
+19. GitOps              pull-based delivery, progressive deploys, drift
+20. SLOs & incidents    SLIs/SLOs, error budgets, SEVs, blameless postmortems
+21. API/gRPC design     contracts, idempotency, versioning, concurrency
+22. Testing             layered tests, contract/chaos/canary, CI gates
+23. Leadership          leverage, RFCs/ADRs, cross-team, the L6 case
+```
+
+The 17–23 docs are *cross-cutting*: they don't come after 16 in a line, they *overlay* it. You learn system-design reasoning while doing Terraform; SLOs while building observability; contract testing while writing the API. Read them alongside the matching build doc, not in sequence after.
+
 ---
 
 ## Why this order?
@@ -160,6 +174,14 @@ Each milestone should end with a **working, observable system**, not a folder of
 - **M14 — Backup/DR**: A full restore drill from backup succeeds.
 - **M15 — Runbook**: You can hand the platform to another engineer and they can operate it.
 
+### Senior / leadership layer (cross-cutting, not sequential)
+These overlay the build above; each pairs with the build doc it reinforces:
+- **M16 — Design**: Your ADRs (doc 17) narrate every major choice with the four-part structure (decision / constraint / alternative / revisit).
+- **M17 — Mesh + GitOps**: Service-to-service mTLS (doc 18) and pull-based Argo CD deploys (doc 19) with a tested canary gate.
+- **M18 — Reliability as a budget**: SLOs + error-budget gauges + MWMR alerts (doc 20) *are* your paging, not raw thresholds.
+- **M19 — Contracts & tests**: API/gRPC contract gate + the doc-01–15 failure drills made into CI chaos/canary tests (docs 21–22).
+- **M20 — The L6 case**: A portable promotion narrative — Craft + Leverage + Judgment (doc 23).
+
 ---
 
 ## How to know you're done
@@ -170,5 +192,6 @@ You are done when you can:
 2. **Kill any single component** and explain the blast radius without looking.
 3. **Get paged** by your own alert and resolve it using only your dashboards and runbook.
 4. **Explain the tradeoff** of every major decision — why CloudNativePG and not a plain chart, why Loki and not ELK, why this ingress and not that one.
+5. **Make the good thing the default** — state *how many* future services inherit a decision you made (the L6 leverage claim, doc 23).
 
 That's the bar. Now start at `01-terraform-infra`.

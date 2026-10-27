@@ -75,7 +75,7 @@ updates possible (below) without touching indexes.
 ## Tuple layout
 
 ```
-  tuple header (23 bytes, fixed)
+  tuple header (~24-28 bytes, computed via MAXALIGN)
   ┌──────────────────────────────────────────────────────────────┐
   │ xmin (4) │ xmax (4) │ cmin/cmax (4) │ ctid (6) │ infomask (2)│
   │  ... hint bits live here ... │ null bitmap (if nullable cols) │

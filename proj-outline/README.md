@@ -2,7 +2,7 @@
 
 > Own the entire platform. From bare metal to production-grade observability.
 
-This project documents the complete platform journey using **Outline** (open-source team knowledge base by Gitlab 256-research) as the application payload. You deploy the app, but the real product is the **platform underneath it** — the thing that makes the app survive node failures, scale cleanly, and give you visibility into what's actually happening.
+This project documents the complete platform journey using **Outline** (an open-source team knowledge base) as the application payload. You deploy the app, but the real product is the **platform underneath it** — the thing that makes the app survive node failures, scale cleanly, and give you visibility into what's actually happening.
 
 ---
 
@@ -42,8 +42,17 @@ proj-outline/
 ├── 13-node-health           ← node-exporter, node-problem-detector, kubelet, NTP drift
 ├── 14-security-hardening    ← RBAC, NetworkPolicies, PodSecurityStandards, secrets mgmt
 ├── 15-backup-dr             ← Postgres backup, Velero, snapshot strategies, RTO/RPO
-└── 16-operations-runbook    ← Day-2 ops: rollbacks, scaling, debug sessions, on-call
+├── 16-operations-runbook    ← Day-2 ops: rollbacks, scaling, debug sessions, on-call
+├── 17-system-design         ← Distributed design: CAP/consistency, partitioning, ADRs, tradeoffs
+├── 18-service-mesh         ← Service-to-service mTLS + identity + traffic policy (Istio/Linkerd)
+├── 19-gitops               ← Argo CD / Flux: pull-based deploys, progressive delivery, drift
+├── 20-incident-slo         ← SRE: SLIs/SLOs, error budgets, SEVs, blameless postmortems
+├── 21-api-grpc-design      ← API/gRPC contracts: idempotency, versioning, pagination, concurrency
+├── 22-testing              ← Test pyramid, contract/chaos/canary, CI gates
+└── 23-leadership-impact    ← L5→L6: leverage, ADRs/RFCs, cross-team, promotion narrative
 ```
+
+The first 17 are the **platform build** (bottom-up, in dependency order). The last 7 are the **senior/leadership layer** (17–23) — the material that separates an L5 who *runs* a platform from an L6 who *designs it, makes it the default, and makes others better*. Read 00–16 to build and operate it; read 17–23 to be *senior* about it.
 
 ## How to use this
 
@@ -68,6 +77,10 @@ Week 9-10 │  Observability: Prometheus + Grafana dashboards
 Week 10-11│  Logging: Loki / ELK stack
 Week 11-12│  Node health + Security hardening
 Week 12-13│  Backup, DR, runbooks
+
+Senior layer (read alongside, not sequentially):
+Week 13+ │  17 System design · 18 Service mesh · 19 GitOps
+Week 14+ │  20 SLOs & incidents · 21 API/gRPC · 22 Testing · 23 Leadership
 ```
 
 ## The senior engineer's mental model
