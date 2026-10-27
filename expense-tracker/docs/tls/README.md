@@ -20,6 +20,7 @@
 | [`this-project-topology.md`](this-project-topology.md) | The two encryption layers (Tailscale/WireGuard vs TLS), where to terminate, which cert strategy to use, what to record in `design.md` | When deploying or reviewing the edge |
 | [`operational.md`](operational.md) | Cert nearing expiry, renewal, chain ordering, key rotation, ACME rate limits, why TLS even on a private network | When running it in anger |
 | [`mtls-and-cert-generation.md`](mtls-and-cert-generation.md) | **Hands-on lab**: build a CA + leaf with openssl, verify chains, do mTLS, then the same end-to-end in Go (`x509`, `crypto/tls`, `CreateCertificate`) | When you want to generate/verify certs and speak Go |
+| [`tllab/`](tllab/) | A self-contained, runnable Go test that machine-checks the lab's claims (chain verifies, rogue CA fails, mTLS accepts/rejects) — `go test -v` in the folder | After the lab, to *prove* the claims without a PKI |
 
 ## Suggested reading order
 

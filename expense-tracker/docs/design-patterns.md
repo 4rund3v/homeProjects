@@ -1,5 +1,10 @@
 # Design Patterns
 
+> **Deep-dive versions live in [`design-patterns/`](design-patterns/)** — one doc each
+> for DDD-tactical, creational, structural, behavioral, and reliability patterns, with
+> worked examples on this codebase and interview angles. This file is the one-page
+> overview / index. Read the folder for L5/L6 depth.
+>
 > The patterns worth knowing, each mapped to **whether it applies to this project** —
 > and when it's a trap. No code; the intent, the shape, and the judgment call. Patterns
 > follow from the principles in [`oop-principles.md`](oop-principles.md); the

@@ -46,6 +46,29 @@ gRPC's whole value is that the `.proto` *is* the contract — versioned, diff-ab
 
 > **The L6 rule — every mutating operation you'll retry *must* be idempotent**, either by nature or by an **idempotency key** the client supplies. The client sends `Idempotency-Key: <uuid>`; the server dedupes on it. This is *the* mechanism that makes retries safe (doc 18's mesh retries, doc 22's chaos tests). **A non-idempotent POST with a network retry in the mesh = duplicate documents.** Design for the retry from day one.
 
+**What "the server dedupes on it" actually looks like (the implementation a panel will make you derive):**
+
+Two common shapes, pick based on whether you need to *return the original response* to a replay:
+
+```
+# (a) Cache the result — return the *same* response on replay (strongest)
+POST /v1/documents, Idempotency-Key: 9f2c
+  1. SET idem:9f2c  {status: PENDING}  EX 86400     # claim it first (atomic)
+  2. run the create → { document_id, 201 }
+  3. SET idem:9f2c  {status: DONE, body: {...}}  EX 86400
+
+POST /v1/documents, Idempotency-Key: 9f2c   (a *retry* arrives)
+  1. GET idem:9f2c  → {status: DONE, body}      # replay the cached 201
+  2. return the *original* response (same document_id)
+
+# (b) Uniqueness constraint — cheaper, no response cache
+-- DB: CREATE UNIQUE INDEX ON documents(idempotency_key);
+--   INSERT ... ON CONFLICT (idempotency_key) DO NOTHING
+# A retry just *no-ops* on the second insert; the client gets the original row.
+```
+
+The gotcha that makes this a real design decision, not a one-liner: **a crashed *first* request.** The client sent `Idempotency-Key: 9f2c`, the server claimed it and started creating, then died. Now a retry sees `idem:9f2c = PENDING` and must decide: **re-run, or refuse?** The senior answer: **re-run, but guard the second create with the same uniqueness constraint** so the re-run can't *double-create* either. That's why the DB unique index (b) is the real safety net and the cache (a) is an optimization on top of it. A panel that asks "what happens to a *stuck* idempotency claim?" is probing exactly this — **name the PENDING-claim + unique-index combo, and the "a claim older than the TTL can be safely re-run" rule.**
+
 ### 2. Versioning
 
 - **URI versioning** (`/v1/`, `/v2/`) — REST classic. Simple, but *every* new major is a new parallel surface you must maintain.
@@ -68,6 +91,8 @@ gRPC's whole value is that the `.proto` *is* the contract — versioned, diff-ab
 
 - **Cursor-based** (a token the client passes back) > offset-based (`?page=42`) — offset breaks when items shift; a cursor is stable.
 - **Server caps the page size** (e.g., max 100). No consumer can accidentally request 1M rows.
+
+**How to pick the cap (the method a panel will ask, not just "100"):** cap = *the largest page a real UI or client actually renders in one screenful* — usually 50–200 for a doc list, and the cap exists so *no single response* can be bigger than the largest page anyone will *display*. Set the **default** smaller (20–50) so a forgotten `?limit=` doesn't drag a huge page. The real protection is the cap; the default is ergonomics. **If you can't name a concrete "how many items fit on a screen" number, you haven't actually designed the list endpoint.**
 
 > **Threshold — cap every list endpoint.** An unbounded list is a DoS vector (your own consumer can crash you with `?limit=10000000`). The L6 instinct: **no list endpoint has no default and no cap.**
 
@@ -146,6 +171,17 @@ buf breaking                                            # google/buf: the tool t
 openapi-diff breaking old_spec.yaml new_spec.yaml
 ```
 
+**Which spec changes are "breaking" (the rule a panel wants, not a tool name):**
+| Change | Breaking? | Why |
+|---|---|---|
+| Remove a field / endpoint / method | **Yes** | A consumer sending/reading it now 400s |
+| Change a field's type or a required→optional *reverse* (adding a *required* field) | **Yes** | Old consumers don't send it |
+| Change a field's *meaning* (same name, new semantics) | **Yes** (silent) | Worst kind — no type error, just wrong data |
+| Add an *optional* field / new endpoint / new enum value | **No** | Old clients ignore unknowns; additive |
+| Change a *default* value | **No** (usually) | Additive-safe; check no consumer hard-coded the old default |
+
+So `buf breaking` / `openapi-diff breaking` is really a **list of rules** you're running, not a magic gate. Knowing *which* changes are the breaking ones is the L6 part — the tool just enforces the list.
+
 > **The L6 tool to name-drop:** **`buf`** (for protobuf) and **OpenAPI diffing** (for REST) — *contract compatibility checks in CI.* The moment a PR that changes an API fails a `buf breaking` / `openapi-diff` check, the contract is the gate, not a review comment. **APIs are tested like code — the contract is the test.**
 
 ---
@@ -173,17 +209,24 @@ openapi-diff breaking old_spec.yaml new_spec.yaml
 4. **An unbounded list** (`?limit=` uncapped) → a consumer requests 1M rows; you OOM. Add the cap; feel the DoS surface you just closed.
 5. **Change a `503` to a `500`** → a downstream retrier silently stops retrying. Revert; feel why status codes are *contract*.
 6. **Protobuf field-number reuse** → old clients mis-read the new field as the old one. Keep numbers permanent; add new ones.
+7. **Consumer-side field removal** (the *mirror* of #2): a client *stops sending* a field the server now *requires* → mass 400s on that client's traffic. This is the one that's invisible in a server-side `buf breaking` (the *server* spec didn't change — a *consumer* regressed). Add a **consumer-driven contract test** (doc 22): record what the consumer *actually* sends and assert it still satisfies the server's required fields.
 
 ---
 
-## The L5/L6 lens: what this signals
+## The L5/L6 lens: what panels probe to *refute* you
 
-| Probe | L6 answer |
-|---|---|
-| "REST or gRPC here?" | "Outline's public API stays REST — it's browser-facing and consumers expect it. My *internal* service-to-service calls (if I split it) are gRPC: explicit contract, streaming search, per-language clients. The edge is *a human/browser* vs. *an internal service*." |
-| "How do you keep the API stable?" | "90% is *not needing a version* — additive field additions only. A version bump is reserved for the *rare* meaning-change/removal, with a deprecation window. My consumers are my contract; I don't break it casually." |
-| "How do you make retries safe?" | "Idempotency key on every mutating op, deduped server-side. Concurrency via etags + 409. No *silent* data loss, no *duplicate* writes." |
-| "How do you test the API?" | "The contract is in Git (`.proto`/OpenAPI) and CI runs a *breaking-change* gate (`buf breaking` / OpenAPI diff). The API is tested like code — the contract is the test." |
+Not "what I'd say" — **what a hostile panel will ask to expose that you're reciting**, and the concrete artifact / number that *stops* the refute.
+
+| Panel probe | The refute they're looking for | The concrete artifact that *stops* it |
+|---|---|---|
+| "REST or gRPC here?" | "You picked by religion, not by the edge." | "The *edge* decides: human/browser-facing = REST (Outline's public API); internal S2S = gRPC (streaming search, explicit contract). I'd switch the moment a call crosses *into an internal service* that's not browser-reachable." |
+| "How do you make a retry safe?" | "You can't derive the dedup." | "Client supplies `Idempotency-Key: <uuid>`; server does atomic `SET NX` + unique DB index `ON (idempotency_key)`; a *stuck* PENDING claim older than the TTL is re-runnable. Here's the PENDING → DONE state transition and why the DB unique index is the real safety net, the cache an optimization." |
+| "How do you keep the API stable?" | "You version too often or too rarely." | "Additive-only is the default (new optional field = no bump). A version bump is reserved for meaning-change / removal, with a deprecation window. I *can* state which of my fields are additive-safe and which would force a v2 — and there are *fewer* v2-worthy changes than you'd think." |
+| "How do you test the API?" | "You don't know which changes break consumers." | "The contract is in Git; CI runs `buf breaking` / `openapi-diff` — and I know *which* rule fires: field removal / required-add / meaning-change = breaking; optional-add / new-endpoint = not. The tool enforces the *list*, and I can name the list." |
+| "What's the most common bug source?" | "You've never hit the real one." | "A *consumer* dropping a server-required field (invisible to server-side breaking checks) — caught by a consumer-driven contract test, not by `buf breaking` on the server spec. That's the one that bites in multi-team systems." |
+| "Give me a concrete refusal." | "You approve what you shouldn't." | "I'd reject: removing a field without a deprecation window; adding a *required* field to an existing endpoint; changing a `503` to a `500` (breaks retrier logic); reusing a protobuf field number. Each has a named reason, not a vibe." |
+
+> **The meta-skill, applied to APIs:** bring a *filled-in* idempotency state machine and the *breaking-change rules table* to the interview — the panel can ask "derive this for *our* endpoint" and the one who's only reciting generalities fails that.
 | "What's your most common bug source?" | "Non-idempotent operations being retried in a distributed system. I design the *dedupe key* in before I build the endpoint, because the mesh retries for me whether I want it to or not." |
 
 ---

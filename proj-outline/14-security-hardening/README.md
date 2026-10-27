@@ -109,6 +109,8 @@ kubectl auth can-i read secrets -n kube-system --as=system:serviceaccount:outlin
 ```
 
 > **Threshold — audit quarterly and after every chart install.** Charts create their own SAs and bindings; over months, permissions accrete. `kubectl auth can-i --list` per SA is the poor man's access review. Ask of every line: "if this credential leaked, what's the worst day?"
+>
+> **The drift metric (the number that makes "quarterly" checkable):** snapshot `kubectl auth can-i --list` per SA to Git (a script that writes `sa-audit/<ns>.<sa>.txt`). Quarterly, `git diff` against the last snapshot — **flag any *added* verb/resource line** (e.g., `create pods` appeared somewhere it wasn't 3 months ago). An *added* line is a regression to investigate; unchanged is the health check. This is the same "empty plan = healthy" idea from Terraform (doc 01) applied to RBAC.
 
 ---
 
@@ -214,6 +216,8 @@ spec:
 
 **Sealed Secrets** — the alternative for GitOps-style flows: encrypt with the cluster's public key, commit the encrypted blob, only the in-cluster controller can decrypt. Simpler than ESO+Vault; rotation is its weakness (re-encrypt on rotate).
 
+> **The key-split that makes "only the in-cluster controller can decrypt" true (the part a panel will ask for):** Sealed Secrets is asymmetric. `kubeseal create-keypair` produces a **public key** (distributed to anyone who can push to Git) and a **private key** (mounted *only* into the `sealed-secrets` controller, never in Git). `kubeseal` encrypts the Secret with the *public* key → the committed blob is gibberish to anyone, including a malicious Git pusher, because **only the controller holds the private key.** "A bad push can't read my secrets" is true *because* the decrypting key isn't in the repo — it's in-cluster. If you can't state that split, you've memorized the name without the mechanism. (Note: this asymmetry is also the whole story; the "rotate = re-seal" cost is that the public key changes and every sealed blob must be re-encrypted.)
+
 > **Tradeoff — Sealed Secrets vs. ESO.** Sealed Secrets: secrets live encrypted *in Git* (great for pure GitOps, one controller, no backend to run); rotating means re-sealing every affected secret by hand. ESO: secrets live in a real backend with real rotation, richer (AWS/GCP/Vault backends) — but you now operate that backend. **For this project: start Sealed Secrets (simpler, Git-native), graduate to ESO+Vault when you want rotation drills.** Either beats the common baseline: plaintext in values.yaml.
 
 ### The k8s Secret baseline (regardless of tool)
@@ -259,6 +263,8 @@ You already have the pieces (docs 04–05); assemble them into policy:
 4. **Verify CNI enforcement** → with Flannel, "blocked" traffic still flows. Feel the difference after switching to Cilium/Calico.
 5. **Flip `enforce: restricted` prematurely** → watch a deploy get rejected; then do the warn→audit→enforce sequence properly.
 6. **Rotate the DB password** → the full end-to-end drill; time it; automate what hurt.
+7. **NetworkPolicy-vs-DNS split-brain** → a pod's name *resolves* (DNS works, `getent hosts` returns an IP) but the *connect* is denied by a NetworkPolicy. The symptom looks like "the service is there but I can't reach it" and you'll lose an hour suspecting the network before you remember "name resolves, policy blocks." Debug order: `nc -zv <svc> <port>` from a pod *in* the allowed namespace first (if that works and the foreign one doesn't, it's the policy, not DNS).
+8. **Stale ServiceAccount token after rotation** → pods mount the SA token at startup; after you rotate the token (or the issuing SA), already-running pods keep the *old* token until restarted. So a "I rotated the SA so the pod should now have new perms" that "doesn't work" is usually a pod that hasn't been recycled. **The drill: rotate, then confirm the pod's mounted token is actually the new one** (`kubectl exec ... cat /var/run/secrets/.../token`), or just restart the pod and observe. This is why doc 14's "never mount the token" (`automountServiceAccountToken: false`) is the *stronger* fix — no token to go stale.
 
 ---
 

@@ -72,6 +72,8 @@ contract:     buf breaking / OpenAPI diff passes only if the two agree
 
 > **The L6 detail — provider-side contract tests.** The *server* (provider) publishes a *consumer-driven* contract: "here's every shape my consumers actually use." A server change that *breaks* one of those is caught *by the consumer's test*, not by a lucky full-suite run. This is how you change a service without breaking the 50 teams that use it. **It's the mechanism that makes *large* multi-service systems evolvable.**
 
+> **Failure mode — the *over*-strict contract gate.** A `buf breaking` / consumer-driven check that's *too* strict (flags additive changes that are actually safe, or a too-narrow "exactly these fields" assertion) produces the same trust-erosion as a flaky test: **people start ignoring it.** The L6 discipline *from the flakiness section applies to the contract layer too* — quarantine a contract-gate false-positive instead of deleting the check. **A contract gate that fires on every additive change is no different from a flaky test that fires on every PR; it gets muted, and then it catches the real break too.**
+
 ### 2. Canary *analysis* (doc 19 made concrete)
 
 Progressive delivery (doc 19) advances a canary **only on a metric signal.** The test that earns it: **inject a bad signal on the canary variant and confirm the analysis holds it at 5% and rolls back.** Without *that* test, your canary is "a slow rolling update" — it ships 100% and *then* the alert fires. **The canary is only as good as the analysis that gates it; test the analysis, not just the rollout.**
@@ -103,6 +105,8 @@ PR → lint → unit (fast, gate on <60s) → contract (buf breaking / OpenAPI d
 
 > **Threshold — the *fast* gate matters more than the *complete* gate.** A 12-minute suite gets skipped under pressure; a 60-second gate is *always* run. **Front-load the cheap, high-signal tests (unit + contract) into the fast gate that blocks a merge *before* the slow layers.** The slow layers (E2E/chaos/load) run on *every* commit that passed the fast gate — so the fast gate's job is to make the slow gate *run at all.* This is why "test in layers" is an *architecture* decision, not a "run more tests" one.
 
+> **Why *60s* specifically (the number a panel will ask you to justify):** it's a *behavioral* threshold, not a magic one. The rule of thumb: **if a gate takes longer than a person's patience window while *waiting for the merge to unlock*, people stop waiting for it and start bypassing it** — and a bypassed gate catches nothing. 60s is short enough that a developer stays in the flow; past ~2–3 min, bypasses and "I'll let it run in the background" start happening at non-zero rates. So the split is: **fast gate = everything that can run in <60s** (unit + contract, parallelized); **everything slower is the *slow* gate that runs *because* the fast gate passed.** If your unit suite is 4 minutes, that's a signal it needs *sharding* (split into N parallel buckets, each <60s) — the fix is concurrency, not patience. **The panel question "why 60s" is answered by "because that's where *people stop waiting*, and a gate nobody waits for is a gate that never runs."**
+
 ---
 
 ## The workflow you'll live in
@@ -120,6 +124,52 @@ make chaos-failover-postgres               # doc 06, now automated
 make chaos-kill-node                       # doc 13
 make chaos-disable-mesh-policy             # doc 18 — the black-hole drill
 ```
+
+**What the load gate *asserts* (the `p99=500ms` isn't a print, it's a pass/fail):** k6's `-e p99=500ms` is an **exit criterion** — the job *fails the build* if p99 exceeds 500ms over the test. A minimal shape:
+
+```js
+// load-test.js — enough to assert the HPA target, doc 10
+import http from 'k6/http';
+import { check } from 'k6';
+
+export const options = {
+  stages: [
+    { duration: '30s', target: 50 },   // ramp to 50 VUs
+    { duration: '1m',  target: 50 },    // hold (let the HPA have a chance to scale)
+    { duration: '30s', target: 0 },
+  ],
+  thresholds: {
+    p99: ['p99<500'],      // exit-criterion: fail build if p99 ≥ 500ms
+    http_req_failed: ['rate<0.01'],
+  },
+};
+
+export default function () {
+  const r = http.get('http://outline:3000/api/health');
+  check(r, { 'status 200': (r) => r.status === 200 });
+}
+```
+
+And the HPA it's gating on (doc 10) — the test and the scaler must agree on the number:
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: outline-server, namespace: outline }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: outline-server }
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target: { type: Utilization, averageUtilization: 75 }
+  behavior:
+    scaleDown: { stabilizationWindowSeconds: 300 }   # don't flap
+```
+
+> **The gate-to-metric link a panel will check:** the load test holds 50 VUs for a full minute so the HPA's 75% CPU target actually triggers a scale-out, and the test only passes if p99 stays under 500ms *while* that happens. **If you test the load but never assert the HPA fired, you've measured a 2-replica ceiling, not the scaler.** Assert both.
 
 ---
 
@@ -145,18 +195,24 @@ make chaos-disable-mesh-policy             # doc 18 — the black-hole drill
 4. **Change a service's contract silently** (break the shape) → the consumer's contract test catches it *before* deploy; feel why the contract is the test.
 5. **Skip the chaos drill** (never kill Postgres in CI) → the day real failover is needed, it's *unproven*; make it a gate.
 6. **A timing-dependent test** (job "done in 1s") → make it eventual (poll to a deadline); feel why `sleep`-and-assert is the flaky-test factory.
+7. **A timing-based *chaos* gate without a deadline** ("failover within SLO") → the same flaky factory, in the chaos layer: "within SLO" needs a *concrete* wall-clock cap (e.g., "promote within 90s"), otherwise the gate is a sleep-and-assert flake just like #6. **The doc warns about this for unit tests; apply the identical discipline to chaos gates — "failover succeeded" must mean "promoted *by time T*", not "eventually."**
 
 ---
 
-## The L5/L6 lens: what this signals
+## The L5/L6 lens: what panels probe to *refute* you
 
-| Probe | L6 answer |
-|---|---|
-| "How many tests?" | "The *right number* for each layer: many fast units, few high-value E2E. I'd diagnose the *shape* — a cone or hourglass is the real problem, not the count." |
-| "What's the most expensive test?" | "E2E/chaos — but only *because* the cheap layers should have caught the bugs they catch. If a bug first appears in E2E, my unit layer is too weak." |
-| "How do you keep a big system *evolvable*?" | "Consumer-driven contract tests. A server change that breaks a consumer's *shape* is caught by the *consumer's* test, not by luck. That's how 50 teams change a service without breaking each other." |
-| "What's the *real* test-system threat?" | "Flakiness — because a flaky test you've stopped trusting is a test you've stopped running. I quarantine, I don't delete, and I front-load a fast gate so the slow layers *actually get run.*" |
-| "How does this map to the project?" | "The 'cause a failure' drills from docs 01–15 are my chaos suite. I formalize them into CI so they're *repeatable and gated*, not one-off." |
+Not "what I'd say" — **what a hostile panel will ask to expose that you're reciting**, and the concrete number / artifact that *stops* the refute.
+
+| Panel probe | The refute they're looking for | The concrete artifact that *stops* it |
+|---|---|---|
+| "How many tests?" | "You optimize coverage, not risk." | "I optimize *layer*: many fast units, few high-value E2E. I'd diagnose the *shape* — a cone/hourglass is the real bug. Here's my suite's layer split." |
+| "What's the most expensive test?" | "You don't know *why* it's cheap." | "E2E/chaos — and only because the cheap layers should have caught what they catch. If a bug first surfaces in E2E, my unit layer is too weak. I've traced one such bug up from E2E to the unit that should have caught it." |
+| "Why 60s for the fast gate?" | "You picked a number." | "It's *where people stop waiting for the merge* — past ~2-3 min, bypasses start. The fix for a slow unit suite is *sharding into <60s buckets*, not patience." |
+| "How do you keep a big system evolvable?" | "You run the gate, not the model." | "Consumer-driven contract tests: a server change that breaks a consumer's *shape* is caught by the *consumer's* test. And I know the failure of a *too*-strict gate — it gets muted exactly like a flaky test; I quarantine false-positives instead of deleting the check." |
+| "What's the *real* test-system threat?" | "Flakiness." | "Trust. A flaky test you've stopped trusting is a test you've stopped running. I quarantine (not delete), front-load a <60s gate so the slow layers *actually get run*, and I apply the same eventual/poll discipline to *chaos* gates ('promoted by 90s', not 'eventually')." |
+| "How do you split fast/slow gates concretely?" | "You can't name the split." | "Fast (<60s, blocks the PR): unit + contract, sharded. Slow (runs *because* the fast gate passed): integration on real deps, E2E, load, chaos. The split is *latency of the layer*, not a preference." |
+
+> **The meta-skill, applied to testing:** bring the *shape* diagnosis, the *60s* justification, and the *flakiness-as-trust* framing as artifacts, not slogans. The panel can ask "derive the split for *our* suite" — the one who's only reciting generalities fails that.
 
 ---
 

@@ -270,3 +270,42 @@ Two ways this project handles it:
 2. **The idempotency key** `(mac, observed_at, source)` from the ingestion layer — but note the Faust consumer is a *separate consumer group* with its own offsets, so it needs its own dedup reasoning, not the ingestion layer's.
 
 Option 1 is the recommended build. It is the same reasoning that makes the ingestion consumer safe, applied at the aggregation layer.
+
+---
+
+## Deep Dive — Consumer Groups and Rebalancing
+
+The ingestion, Faust, and metrics consumers all read `device-findings` but with **different consumer group IDs**, so each one gets its own copy of every message. A consumer group is the unit Kafka partitions messages across: partitions are assigned to *members of a group*, and each partition goes to exactly one member. This is why three independent consumers can read the same topic and each see everything — they are in three different groups.
+
+### The two assignment strategies
+
+- **Range (default)** — splits each partition sequentially across members. Member 0 gets partitions 0 and 1, member 1 gets 2 and 3. Simple, but every member holds a contiguous range of *different* partitions, so there is no redundancy if one dies.
+- **Sticky** — distributes as evenly as possible and, on a rebalance, keeps existing assignments intact and only reassigns the partitions of the departing member. Fewer moves, less state churn. This is what you want for the Faust processor, because its window state is partitioned and moving it is expensive.
+
+### What a rebalance actually happens during
+
+1. **Member leaves** — process crash, pod eviction, or the consumer stops calling `poll()` for longer than `max.poll.interval.ms` (the broker concludes it is hung).
+2. **The broker (via the group coordinator) detects it** after `session.timeout.ms` of no heartbeats.
+3. **The broker recomputes the partition assignment** and notifies all surviving members.
+4. **Members close their current partitions** — in exactly-once mode this means completing or aborting any open transaction.
+5. **New assignments are fetched and each member resumes from its committed offset.**
+6. **Processing resumes.**
+
+During steps 3–5 the group is **not processing** — that is the downtime window of a rebalance. It is the single most important cost of horizontal scaling with consumer groups: every scale-up and scale-down is a rebalance, and every rebalance is a brief pause of all ingestion.
+
+### The two problems this causes in this system
+
+**1. The "stop-the-world" cost.** A scale-up of the ingestion worker from 2 to 4 consumers is not a seamless addition. All four members rebalance, all processing pauses, and the group resumes from committed offsets. If you scale during a trace burst, you will see a lag spike on the consumer-lag metric even though nothing is broken. The runbook in OPERATIONS.md should list "rebalance in progress" as a benign cause of a transient lag blip before "consumer stuck."
+
+**2. Faust state migration.** The Faust processor runs with Sticky assignment *specifically* so its window state, which is partitioned across its consumers, does not move wholesale on every rebalance. But when a member does leave, its partitions *do* move to another member, and that member must **restore window state from the changelog topic before resuming** — the same restore-from-changelog mechanism described in the Faust deep dive. Until that restore completes, that member is not ready to process, and the materialized "new devices per minute" view has a gap. This is why the stream processor deployment in the Helm chart gets a longer readiness signal: ready does not mean "process is up," it means "window state has been restored and the first window has been re-materialized."
+
+### The operational knobs
+
+| Knob | What it controls | Symptom if mis-set |
+|---|---|---|
+| `session.timeout.ms` | How long a broker waits before declaring a member dead | Too short, lag spikes trigger false rebalances; too long, real dead members linger and steal partitions |
+| `max.poll.interval.ms` | How long a consumer may go between `poll()` calls | Too short, slow downstream writes (to Postgres) look like hangs and trigger unnecessary rebalances |
+| `heartbeat.interval.ms` | How often a member pings the group coordinator | Three times per session timeout is the rule of thumb |
+| `max.partition.count` / consumer count | The practical ceiling — more consumers than partitions means some idle | Extra workers sit doing nothing; the scale-up gave no throughput |
+
+**The cardinal rule:** you can never have more consumers in a group than partitions in the topic. With 3 partitions on `device-findings`, the fourth ingestion worker gets no partition and no work. This is why the partition count is sized ahead of the expected consumer count, and why scaling the stream processor is bounded by the same partition count that bounds the ingestion worker.

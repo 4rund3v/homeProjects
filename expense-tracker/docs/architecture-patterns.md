@@ -1,5 +1,10 @@
 # Architecture Patterns
 
+> **Deep-dive versions live in [`architecture-patterns/`](architecture-patterns/)** —
+> one doc each for layered, hexagonal, DDD-strategic, event-driven, and resilience,
+> with worked examples and interview angles. This file is the one-page overview /
+> index. Read the folder for L5/L6 depth.
+>
 > The system-level shapes — layered, clean/hexagonal, DDD, CQRS, event-driven, and the
 > reliability patterns (saga, circuit breaker, back-pressure). Each mapped to **what
 > shape this project should take, per phase**, and what to adopt later. Object-level

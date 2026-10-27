@@ -28,6 +28,16 @@ The core property: **Git is the source of truth; the cluster is a *projection* o
 | Progressive delivery | Native (Argo Rollouts) | External (Flagger) |
 | Learning surface | Rich: apps, sync windows, out-of-sync detection | Light: everything is a Git object |
 
+> **What "out-of-sync detection" actually does (the mechanism, not the name):** Argo CD renders the *desired* manifest (from the Git ref) and *compares it field-by-field* against the *live* object in the API. Any field that differs — the image tag, a ConfigMap key, a replica count — shows up in the **`OutOfSync`** condition on the Application object, with a *diff* you can read:
+> ```
+>   *deployment outline-server:
+>       image: "harbor.lab.example/outline:abc123"  →  "harbor.lab.example/outline:def456"
+>       replicaCount: 3  →  2
+> ```
+> **This diff is the GitOps version of `helm diff` / `terraform plan`.** If you can't produce that diff on demand, you're not actually using GitOps — you're doing "apply-and-pray." Practice the drill: *intentionally* `kubectl set image` in the cluster, then run `kubectl argocd application diff outline` — the diff should show your change and the next sync should *revert it*. If it doesn't revert, GitOps isn't *managing* that object; it's just watching.
+
+> **Flagger's "analysis step" (the Flux-side progressive delivery)** — *what a canary gate actually does, not what the name suggests:* Flagger's `Rollout` controller (or the Flux `Progressive Delivery` CRD) has an **analysis step** that runs on an *interval* (e.g., 60s) between traffic shifts. Each tick, the analysis step: (1) queries a metric source (Prometheus is the standard), (2) evaluates a threshold ("error rate < 1% in the last 5m" or "p99 < 500ms in the last 3m"), (3) either **advances** the traffic split (5% → 20% → 50% → 100%) or **rolls back** to the stable version if the metric breaches. **The gate is a closed loop, not a one-shot check** — that's the entire value. Without an analysis step, "canary" is just a slow rolling update.
+
 > **Tradeoff — pick Argo CD to *learn GitOps + progressive delivery* in one tool** (Rollouts is the canary mechanic), **Flux if you want the minimal, "everything is a Git object" purity** and don't want a second cluster add-on UI. For this project, **Argo CD** is the better teacher: it makes the *declaration → reconcile → drift* loop visible in a UI you can point at, and its Rollouts feature teaches canary analysis (doc 22) concretely.
 
 ---
@@ -47,6 +57,8 @@ Repo B: "gitops-infra"  ← the *bootstrap* tier. Installs Argo CD *itself* and 
 - **App-of-Apps:** Argo CD, once installed, reads *Repo B* to install the "application of applications" — which is Repo A's Applications. Repo A then holds everything else.
 - This separates **"what the cluster looks like when it first boots"** (B) from **"what's running on it day-to-day"** (A). A node loss or cluster rebuild plays B, then Argo self-heals to A.
 
+> **The chicken-and-egg question, answered explicitly** — how does Repo B get applied on a fresh cluster if Argo CD itself lives in Repo B? It's **out-of-band**: on a brand-new cluster, you `kubectl apply` the Argo CD install *once* (Terraform's Helm provider, or a plain `helm install`, or `kubectl apply -f https://raw.githubusercontent.com/argoproj/argo-cd/.../install.yaml`). From that moment on, Argo CD *is* the thing that keeps Repo B converged, and **that initial install is the one out-of-band act in the whole system** — the same "bootstrap" concept from doc 01. Name it; it's the one thing you *can't* make self-healing without *some* external actor. If the bootstrap breaks (a bad commit to Repo B), the recovery path is the same out-of-band install — so keep the install manifest somewhere you can `kubectl apply` from a laptop without the cluster.
+
 > **The boundary with Terraform (doc 01).** Where does GitOps end and Terraform begin? The clean split:
 > - **Terraform** owns the things *outside* the cluster's API: the nodes/VMs, DNS, cloud resources, and *installing* the bootstrap add-ons.
 > - **GitOps** owns *in-cluster* state: apps, Helm releases, Kustomize overlays.
@@ -63,6 +75,23 @@ Repo B: "gitops-infra"  ← the *bootstrap* tier. Installs Argo CD *itself* and 
 | **Rolling update** | Replaces pods one at a time; on failure, keep the old | default; what `helm upgrade` does |
 | **Blue-green** | Two full sets; flip the Service to the green set; instant rollback | full-state swaps; lower risk than canary |
 | **Canary** | Route 5% → 20% → 100% of traffic to the new version; auto-rollback on metric | the *most* powerful; requires a traffic signal + a *metric-based* analysis step |
+
+**What "flip the Service to the green set" actually looks like.** A blue-green via Argo Rollouts creates *two* Deployments (`outline-server-blue` and `outline-server-green`), a `Service` (still named `outline-server`) that selects on a *stable label*, and a `Rollout` object whose `trafficRouting` block holds the actual flip:
+
+```yaml
+# The Rollout declares which set is "active" — that's the whole flip.
+spec:
+  strategy:
+    blueGreen:
+      activeService: outline-server-blue    # ← the flip: swap this
+      previewService: outline-server-green
+      promotionStrategy:
+        auto:
+          promotionLimitDuration: 1h        # auto-promote after 1h healthy
+      abortScaleDownLimitSeconds: 900       # how long to keep the old set
+```
+
+The actual "flip" is a change to `activeService` (or an `analysis` gate that sets it). **Before the flip, the green set is *warm and idle* — you pre-verify it on a preview port before users ever hit it.** That's why blue-green beats rolling for full-state swaps: the *new* state is tested on 100% of a real pod before it takes 1% of real traffic.
 
 > **The L6 detail — canaries are *metric-gated*, not just traffic-percentaged.** The real power is: "advance the canary to 20% *only if* error rate < 1% and p99 < 500ms in the last N minutes; else roll back." That turns a deploy into a *closed-loop experiment* (doc 22's chaos + doc 11's metrics). A canary with no metric analysis is just a slow rolling update — call it what it is.
 
@@ -129,18 +158,24 @@ kubectl argocd application set outline ...         # emergency override (reverte
 4. **Suspend Argo and edit the cluster** → the edit *sticks* (no reversion). Now re-enable and watch it converge back. Feel why "self-heal you can't stop" is a foot-gun.
 5. **Break the sync-wave order** (app deploys before its DB) → observe the crashloop; re-impose the wave ordering.
 6. **Run a metric-gated canary** on Outline, then *inject latency* on the canary variant → confirm the analysis step *holds* it at 5% and rolls back. This is the doc-22 payoff.
+7. **Revoke the Git token / take the Git remote down** → Argo CD can't *read* the desired state. Verify: (a) already-applied state keeps running (GitOps doesn't *run* anything live; it just converges), (b) *new* changes can't be pulled, (c) your drift-detection is now blind. This is the SPOF a panel will probe — Git remote + token are the "source of truth" and if *that's* down, the whole model degrades to "last known Git state."
+8. **Test a sync window** — suspend auto-sync for 2 hours, make a Git change, and confirm it *holds* until the window closes (rather than applying immediately or never applying). This is the drill that proves the "quiet hours" knob actually works.
 
 ---
 
-## The L5/L6 lens: what this signals
+## The L5/L6 lens: what panels probe to *refute* you
 
-| Probe | L6 answer |
-|---|---|
-| "Push or pull?" | "Pull. Git is source of truth; the cluster converges to it. Jenkins builds + pushes images; GitOps *decides where a tag runs*. The pipeline is a Git author, not the deployer." |
-| "Where does Terraform stop?" | "Outside the cluster API — nodes, DNS, and the *bootstrap* of add-ons. Everything in-cluster, day-to-day, is a Git object. Bootstrap repo installs the apps repo's machinery; I keep the handoff clean, not overlapping." |
-| "How do you deploy a breaking change?" | "Sync waves in dependency order; the deploy is *gated on the previous wave's health*, and a canary advances *only on a metric signal*. If the signal's red, it rolls back before humans notice." |
-| "What's the failure mode?" | "GitOps is a new SPOF that *aggressively* converges — a bad commit can destroy a working cluster. I gate with health checks, sync windows, and a manual suspend I can actually use." |
-| "Why does this matter more than a Helm push?" | "Because *reconciliation* beats *actuation*. A push pipeline deploys once and the cluster can drift forever. GitOps makes the *declared state* continuously enforceable — the cluster can't stay out of sync. That's the reliability property." |
+Not "what I'd say" — **what a hostile panel will ask to expose that you're reciting**, and the concrete artifact that *stops* the refute.
+
+| Panel probe | The refute they're looking for | The concrete artifact that *stops* it |
+|---|---|---|
+| "Push or pull?" | "You don't know *why* pull beats push." | "Reconciliation beats actuation: a push pipeline deploys once, then the cluster drifts forever. Git makes the *declared state* continuously enforceable — the cluster can't stay out of sync. *And* the artifact: I've `kubectl edit`ed a resource and watched Argo revert it on the next sync (drill #1). That's the concrete proof." |
+| "Where does Terraform stop?" | "You can't state the boundary." | "Outside the cluster API — nodes, DNS, *and* the bootstrap add-ons. In-cluster, day-to-day, is a Git object. The handoff: Terraform's Helm provider brings Argo CD into existence (bootstrap, doc 01); GitOps owns everything after. No overlap; Terraform stops at the *install* of Argo." |
+| "How do you deploy a breaking change?" | "You can't describe the gate." | "Sync waves in dependency order; the deploy is *gated on the previous wave's health*, and a canary advances *only* on a metric signal (error rate < 1% and p99 < 500ms in the last 5m). I have a *test canary with a metric gate* (drill #6) — here's the config: `analysis.step` polls Prometheus every 60s, holds at 5% while the metric is red, advances to 20% when green." |
+| "What's the SPOF?" | "You think the cluster is the SPOF." | "The *Git remote + token* is the SPOF, not the cluster. If Git is down, the *declared* state is unreachable — applied state keeps running (GitOps doesn't run things live), but new changes and drift detection stop. Drill #7 exercises exactly this." |
+| "Why does this matter more than a Helm push?" | "You're selling GitOps as a tool." | "The value is *the property*, not the tool: a continuously-enforceable declared state. If I had to pick Flux over Argo CD, or even hand-rolled `kubectl apply` in a CronJob, I'd take the property over the tool. Argo CD is just the one with a UI I can point at and a native Rollouts for canaries." |
+
+> **The meta-skill, applied to delivery:** for every delivery choice — Argo vs. Flux, sync waves, the canary threshold — you should be able to state the **four-part structure** (decision / constraint / rejected alternative / revisit condition) *without notes*, with *your own* drill logs, not a slideware example.
 
 ---
 

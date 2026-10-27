@@ -53,7 +53,7 @@ The relationships between contexts, and what each costs:
    ├──────────────┼────────────────────────────────────────────────────────┤
    │ Conformist   │ CATEGORIES simply accepts EXPENSES's definition of      │
    │              │ "category." No translation needed.                    │
-   ├──────────────┼──────────────────────────────────────────────────────���─┤
+   ├──────────────┼──────────────────────────────────────────────────────────┤
    │ Customer /   │ LOANS (upstream) defines the rules; EXPENSES           │
    │ Supplier     │ (downstream) consumes "a loan balance can be         │
    │              │ updated." Upstream has priority.                     │

@@ -67,6 +67,8 @@ NPD watches kernel logs (dmesg/journald) for host-level trouble and reports them
 - `FrequentKubeletRestart`, `FrequentDockerRestart`
 - OOM events, network trouble
 
+> **The reporting path (the mechanism "reports as a Node Condition" hides):** NPD runs a DaemonSet that *reads* the node's dmesg/journald and runs its own checkers. When a checker fires, NPD **patches `node.status.conditions`** on the Node object *through the API* (it has a ServiceAccount with that permission) — it does *not* wait for the kubelet, which on a failing host is itself degraded or silent. Two consequences a cold reader must know: (1) the *source* is NPD's checker config (`config.json` with custom checkers; the defaults `KernelDeadlock`, `ReadonlyFilesystem`, `FrequentDockerRestart` are baked into the standard config and are keyed to *which* runtime you run — a cAdvisor/containerd node won't emit `FrequentDockerRestart` at all, so a condition that "never exists on your setup" is usually just a checker that doesn't match your runtime, not a missing failure). (2) NPD emits both a **Condition** (a sticky state, survives) *and* a **k8s Event** (transient, ~1h TTL) — alert on the *condition* for persistence, use the *event* for "when did it first happen." The metric `kube_node_status_condition` that the PromQL below queries is provided by **kube-state-metrics** (doc 11) translating that Condition into a number — NPD writes the Condition, kube-state-metrics scrapes it into a series.
+
 Without NPD, a node with a readonly filesystem shows up only as pods mysteriously failing writes. With NPD it's a Node Condition you can alert on — and a condition your automation can react to (cordon the node).
 
 ```promql

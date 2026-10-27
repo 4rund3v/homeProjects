@@ -37,7 +37,13 @@ Two data types carry most of the weight:
 
 - **Counter** — only goes up (requests, errors, bytes). Meaningful only as a *rate* (`rate()`).
 - **Gauge** — a value at a point in time (queue depth, memory used, connections).
-- (Histogram for latency distributions — needed for p50/p99.)
+- **(Histogram** for latency distributions — needed for p50/p99.)
+
+> **Histogram vs. Summary — the distinction a panel will probe, and the trap it hides:**
+> - A **`Summary`** is computed *client-side*: the exporter precomputes `quantile=0.5` and `quantile=0.99` (lines 32–33 above). You can read them directly — but you **cannot** aggregate them across instances. A p99 computed on instance A and a p99 on instance B do *not* average into a fleet p99. Summaries give you per-instance percentiles only.
+> - A **`Histogram`** exports **buckets** (`_bucket`), a cumulative count per boundary (`le="0.1"` = "requests ≤ 100ms"), plus `_sum` and `_count`. Because buckets are *counts*, Prometheus can add them *across* instances and then compute a true fleet-wide percentile with `histogram_quantile` (line 51). **That's the whole reason the `histogram_quantile(0.99, rate(..._bucket[5m]))` example on line 51 assumes a `_bucket` histogram — not a Summary.**
+>
+> **The trap a cold reader hits:** copy the line-51 query, run it against a *Summary* (which has `quantile=` labels, no `_bucket`), and get `NaN` — because `histogram_quantile` needs buckets and there are none. **If your app exposes a Summary, do NOT use `histogram_quantile`; read the `quantile=` series directly.** If it exposes a Histogram (most modern exporters, incl. the Prometheus client libraries' default), `histogram_quantile` works but only as accurately as your bucket boundaries — p99 needs a bucket near your target, else you interpolate coarsely.
 
 > **Senior lens — count it, don't gauge it.** For anything that happens (requests, failures, jobs), expose a counter, not a gauge updated periodically. Counters are lossless under scrape intervals; a gauge "set every 10s" loses everything between samples, and you can't `rate()` it. This is the single most common instrumentation mistake.
 

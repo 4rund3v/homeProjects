@@ -22,7 +22,13 @@ A **service mesh** is a layer of *infrastructure for networking between services
 | **Sidecar** | One proxy container *per pod* (Istio, Linkerd) | Full per-pod control; but a proxy in every pod = memory + startup cost, and `exec`/`port-forward` get awkward |
 | **Ambient / ztunnel** | One proxy per *node*, pod traffic redirected to it (Istio Ambient) | Cheaper, no per-pod footprint; coarser per-pod policy in early versions |
 
-> **Senior lens — sidecar is the default learning choice** because every control lives next to the workload you're debugging. **Ambient is the production-cost choice.** Know both; pick ambient when the sidecar's memory tax hurts on small nodes. For *this* project, sidecar (Istio or Linkerd) is the right first step.
+**How ambient actually works (the mechanics a panel will ask about):**
+
+- **Redirection.** Instead of a sidecar intercepting every connection, the ambient mode uses **eBPF + a CNI** (Istio's CNI plugin) to redirect pod egress to a **node-level `ztunnel`** daemon. The redirect happens at the L3/L4 level; the pod's app never knows.
+- **Identity.** The workload identity is now *node-scoped, not pod-scoped* — `ztunnel` authenticates the pod against its ServiceAccount via the local `kubelet`'s token, and `ztunnel` itself is attested as the node's proxy. Early ambient (Istio 1.24–1.26) has *coarser* policy scope than sidecars because identity lives at the node; newer versions moved back to pod identity via an `waypoint` hop for the per-pod policy you'd want anyway.
+- **Cost profile.** One `ztunnel` per node (≈ 50–100 MB) instead of one Envoy per pod (≈ 50–200 MB each depending on the app's traffic). **On 3 nodes with ~20 pods total, sidecar mode costs ~4 GB of proxy memory; ambient costs ~150 MB.** That's the ambient pitch, and it's what a panel wants to hear you do as arithmetic.
+
+> **Senior lens — sidecar is the default learning choice** because every control lives next to the workload you're debugging. **Ambient is the production-cost choice; pick it when the sidecar's memory tax hurts on small nodes.** For *this* project, sidecar (Istio or Linkerd) is the right first step — you'll *feel* the per-pod proxy in `kubectl top pods`.
 
 ---
 
@@ -48,6 +54,8 @@ Adding a mesh is the natural **next security layer after NetworkPolicy**: Networ
 | **Envoy** (the data-plane proxy) | The actual sidecar; does mTLS, retries, telemetry |
 | **Pilot/CNI** | Redirects pod traffic to the sidecar without `iptables` (Istio) |
 | **Citadel / cert manager** | Issues short-lived mTLS certs to service identities |
+
+> **Note on Citadel** — Citadel is the *original* Istio cert authority and is now effectively deprecated upstream; current Istio uses an integrated CA, an external CA (Vault, cert-manager, Google CA), or a *self-signed* CA inside `istiod`. If you follow pre-2024 tutorials that reference Citadel, redirect to the *current* CA configuration. **A cold reader following old docs will hit a dead end** — flag it.
 
 (Or, with Linkerd: `linkerd-control-plane` + per-pod `linkerd-proxy`. Simpler, fewer knobs — **often the better teaching choice**.)
 
@@ -75,14 +83,14 @@ Consequences a senior reasons about:
 
 ## Traffic policy: retries, timeouts, circuit breaking
 
-The infra-layer version of what Outline's code does in-app. The mesh gives you *defaults* that protect shared dependencies:
+The infra-layer version of what Outline's code does in-app. The mesh gives you *defaults* that protect shared dependencies. **Concrete starting values** (start here; tune from `container_cpu` / error-rate signals, don't guess):
 
-- **Timeout** — bound every call. (Outline→Postgres with no timeout = one slow query wedges a thread forever.)
-- **Retries** — retry on *connection* errors, not 5xx (retries of non-idempotent writes are dangerous — doc 21).
-- **Circuit breaker** — if Postgres errors N times in M seconds, stop sending for a bit and let it recover (prevent a thundering herd).
-- **Rate limit / concurrency** — cap how many in-flight requests a pod can hold to the dependency.
+- **Timeout** — bound every call. *Start at 2s for HTTP, 5s for database calls.* Outline→Postgres with no timeout = one slow query wedges a thread forever.
+- **Retries** — retry on *connection* errors only (RST, connect-refused, 503 from a *proxy* not from the upstream), **at most 2 attempts**, with a `100ms`-`500ms` jittered backoff. Retries of non-idempotent writes are dangerous — doc 21.
+- **Circuit breaker** — *start values*: `max_pending_requests: 1024`, `max_requests: 2048` (per-host concurrency), `consecutive_5xx: 200` (open the breaker). If **200 5xx in a rolling 60-second window** fires, close the circuit for 30 seconds, then half-open with 1 in-flight request. Those numbers are a *starting point* — tune from your real dependency's error-rate baseline (doc 11).
+- **Rate limit / concurrency** — cap how many in-flight requests a pod can hold to the dependency. Start with **1.5× the dependency's known-good concurrency**; 2× for a burst.
 
-> **Threshold — retries × timeout = your worst-case latency.** A call with timeout 2s and 3 retries = up to ~8s before giving up. Multiply by the number of retries your *caller* also does and you've got latency that compounds. **Set the mesh timeout tighter than the app's own timeout; don't stack them.** This is a detail juniors miss and L6s catch in review.
+> **Threshold — retries × timeout = your worst-case latency.** A call with timeout 2s and 3 retries = up to ~8s before giving up. Multiply by the number of retries your *caller* also does and you've got latency that compounds. **Set the mesh timeout *tighter* than the app's own timeout; don't stack them.** This is a detail juniors miss and L6s catch in review.
 
 > **Tradeoff — idempotency before retries.** Retrying a `POST /create` can double-create. Retrying a `GET` is safe. The mesh's retry policy must be scoped to *idempotent* calls only, or you move the retry to the app where it can add an idempotency key. **Retries are an idempotency problem first, a network problem second** (doc 21 develops this).
 
@@ -139,17 +147,24 @@ istioctl x -f virtualservice-yaml                            # simulate: what do
 4. **Take the control plane down** → verify proxies fail *open* (traffic still flows) or *closed* (nothing flows) — know which you have.
 5. **Trace a slow request across hops** → confirm the mesh trace tells you the slow hop; this is the payoff for the overhead.
 6. **Rotate the mesh certs** → verify short-lived cert renewal works and nothing hard-pins an old cert.
+7. **Upgrade the control plane but not the sidecars (version skew)** → a mismatched `istiod` + older Envoy sidecars produces hard-to-diagnose "random" policy rejections and connection resets. **Always upgrade sidecars (or let the mesh auto-inject the new image) in the same rolling window as the control plane; never half-upgrade.**
+8. **Watch proxy memory under load** → with 20 pods and 150 MB average Envoy footprint, that's ~3 GB of *proxy* RAM in a ~8 GB node pool. On a homelab with tight RAM this is the reason you'd switch to ambient (doc 18's cost pitch). Verify with `kubectl top pods` filtered to sidecar containers.
 
 ---
 
-## The L5/L6 lens: what this signals
+## The L5/L6 lens: what panels probe to *refute* you
 
-| Probe | L6 answer |
-|---|---|
-| "Why a mesh at all?" | "Service-to-service identity + mTLS east-west encryption + infra-level retries/circuit-break that we *don't* want in Outline's code. I added it for those three; I'd not add it if we had no identity or encryption requirement." |
-| "Istio or Linkerd?" | "Linkerd to reach 'the mesh works' cheaply and learn the concepts; I've read Istio for the full traffic-splitting / Wasm surface. Ambient is the cost path when sidecar memory bites on small nodes." |
-| "What's the new failure mode?" | "The mesh is a new SPOF — control plane + proxies in the data path. I verify fail-open behavior, and I re-test *every* dependency call after adding the mesh, because a bad AuthorizationPolicy looks exactly like a DB outage." |
-| "How does it interact with NetworkPolicy?" | "NetworkPolicy is coarse reachability (who reaches whom by IP); the mesh is fine-grained identity (who *is* the caller) + encryption + traffic policy. I run *both*: policy denies the flow, mesh denies the unauthenticated identity." |
+Not "what I'd say" — **what a hostile panel will ask to expose that you're reciting**, and the concrete number / artifact that *stops* the refute.
+
+| Panel probe | The refute they're looking for | The concrete artifact that *stops* it |
+|---|---|---|
+| "Why a mesh at all?" | "You don't know when to *not* add one." | The three-item earn test: (a) service-to-service identity, (b) infra-level retries/circuit-break you don't want in app code, (c) encrypted east-west traffic. Say which of the three you have — and when you'd *drop* the mesh. |
+| "Istio or Linkerd?" | "You picked by brand, not by cost." | Do the arithmetic: "On 3 nodes × ~20 pods, sidecar Envoy ≈ 4 GB; ambient `ztunnel` ≈ 150 MB on the same topology. Linkerd is fewer knobs; Istio is the full traffic-splitting surface. I picked X because *this project's* learning objective is Y." |
+| "What's the new SPOF?" | "You don't know whether your proxies fail open or closed." | State *the specific setting*: "The `sidecar.terminationGracePeriodSeconds` and `istio.proxy.autoExclusiveCluster` determine fail-open vs. fail-closed; I've tested it — the answer in my cluster is [fail-open to direct / fail-closed]. Here's the drill log." |
+| "How does it interact with NetworkPolicy?" | "You see them as redundant." | "They're layered, not redundant: NP denies *by identity+IP*, the mesh denies *by unauthenticated caller* and adds mTLS + retry/circuit-break. I run both — I drill by disabling each and observing what *only that one* catches." |
+| "What's the failure mode?" | "You've never half-upgraded a mesh." | The upgrade-skew drill (#7 above): "I've deliberately run an `istiod` + older-sidecar combo; observed connection resets on *policy changes only*, not on steady-state traffic. Here's the log." |
+
+> **The meta-skill, applied to the mesh:** for *every* choice you've made — sidecar vs. ambient, Istio vs. Linkerd, the specific retry/timeout numbers — you should be able to state the **four-part structure** (decision / constraint / rejected alternative / revisit condition) *without notes*, with *your own* measured numbers, not Google's example.
 
 ---
 

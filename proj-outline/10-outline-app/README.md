@@ -99,6 +99,8 @@ This creates a deploy-ordering concern:
 - If 2 server pods + 2 worker pods start "simultaneously" on upgrade, **two processes may run migrations concurrently**.
 - Most migration runners take an advisory lock (`pg_advisory_lock`) making concurrent runs safe-but-serialized; but a long migration means the second process waits, and readiness probes may time out.
 
+> **What an advisory lock is and why it makes this safe (the mechanism the term hides):** `pg_advisory_lock(<id>)` is a *Postgres-side* named lock — the app passes an integer key and Postgres hands it to exactly one session; any *second* session calling `pg_advisory_lock(<same id>)` **blocks until the first commits/ends the transaction.** Outline uses one shared key, so when 4 pods boot "at the same time," 3 of them wait on that key and only one runs the migration; on completion the others proceed, see the schema is already migrated, and no-op. **That's why it's safe, not just "serializes it":** the guarantee is *Postgres-enforced* (an application-level lock or a "just hope" wouldn't survive two pods on different nodes — only a *DB-global* lock spans nodes). The cost: a long migration on pod #1 holds the lock, so pods #2–4 sit in the readiness-timing you sized in the probe section above — which is *exactly* why the startup probe budget matters. This is also why "session pooling" (doc 06) and advisory locks interact: a pooled connection that's held across a transaction doesn't release the lock until that session ends.
+
 > **Senior lens** — the three standard strategies:
 > 1. **Migrate at boot (Outline's default).** Simple, works for small scale. Risk: slow migrations hold up rollouts; concurrent boots contend.
 > 2. **Explicit migration Job before deploy** (helm pre-upgrade hook or CD step). Observability is better — the pipeline stage says "Migrations: passed" and the new pods start against a migrated schema. **This is where you should graduate to (see doc 04, hooks discussion).**
@@ -173,6 +175,8 @@ Workers consume queues. Two operational rules:
 
 1. **Deploy workers *before* server on app upgrades** (or accept queued-job schema skew — usually fine for a homelab since jobs are small and versioned).
 2. **Bound concurrency** — worker parallelism should be explicit (env var), because unbounded concurrency × big import = OOM. Set worker concurrency to something the resource limits can absorb.
+
+> **The concrete var (so "bound concurrency" isn't a suggestion):** BullMQ worker concurrency is set on the worker instance (`new Worker(queue, processor, { concurrency: N })`), and Outline wires it through an env var in its worker bootstrap. **The sizing rule: pick N so that `N × per-job peak memory` fits inside the pod's memory limit** — e.g., if a heavy import peaks ~200 MB and the worker limit is 1 Gi, then `N ≈ 4` is the safe ceiling (`4 × 200 MB = 800 MB < 1 Gi`). Set it, then watch the queue-depth metric (doc 11) to confirm depth tracks your real throughput — that's the "queue-depth-aware scaling" the exit criterion wants, and it's the number, not a vibe.
 
 > **Failure mode — poison messages.** One malformed job retried forever blocks the queue (or burns CPU in a retry loop). Bull/BullMQ-style queues use exponential backoff + max attempts, then move to a dead-letter set. Know where Outline's dead jobs go and check it during incident debugging — "the worker is idle but the queue is full" is almost always a poison message or an exhausted max-attempts situation.
 

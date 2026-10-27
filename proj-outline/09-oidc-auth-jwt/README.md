@@ -98,6 +98,8 @@ The header and payload are base64url-encoded and signed with a private key. The 
 >
 > A 24-hour access token is not "a slightly long expiry" — it's a credential that survives password resets and lockouts. **Access tokens short, refresh tokens revocable, rotation on use.**
 
+> **How refresh-token rotation actually works — and why it's a *theft detector* (the mechanism the term hides):** on a refresh, the client POSTs the *old* refresh token; Keycloak **issues a new refresh token and invalidates the old one in the same step** — a *rotation*, not a re-issue. Each refresh token is usable exactly once; holding a stale one is worthless. Here's why that's a security control, not just hygiene: if an attacker *stole* a refresh token and replays it *after* the legitimate client already rotated it, Keycloak sees **two different requests presenting the same (now-invalid) token** — that's the replay signal. **Senior response: treat a replayed/stale refresh token as a credential-compromise event — invalidate the *entire* refresh chain for that user (all outstanding refresh tokens), not just the one token.** That's "rotation as detection": the rotation guarantee is what makes the replay *visible*, and the response is to kill the family. Without rotation you can't distinguish "user's second device" from "attacker's copy" — the tokens are indistinguishable. **The concrete sequence:** (1) login → get refresh_token A; (2) use A → get refresh_token B, A revoked; (3) A is presented again (stolen/replayed) → Keycloak's `refresh_token_reuse_detected` → revoke B and the whole session, force re-login. A cold reader who's only got "rotate on use" as a slogan can't run steps 3–4; this is the L6 detail.
+
 ---
 
 ## Key rotation — the thing nobody tests

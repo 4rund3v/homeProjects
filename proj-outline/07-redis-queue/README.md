@@ -41,6 +41,16 @@ Kafka is for **log-centric, replayable, high-throughput** streaming. Redis is fo
 
 Redis can do both. For a **cache**, disable persistence (data is reproducible). For a **job queue**, you *must* enable AOF — otherwise killing the pod loses unprocessed jobs.
 
+> **The AOF durability knob you must understand — `appendfsync`:** AOF appends a write to the log *in memory* first, then flushes to disk on a policy you pick:
+>
+> | `appendfsync` | When it flushes | Data loss on power cut | Write latency |
+> |---|---|---|---|
+> | `always` | After *every* command, before the command returns | None | Highest (every write does a disk fsync) |
+> | `everysec` (default) | Once per second, in a background thread | Up to **1 second** of writes | Low |
+> | `no` | Let the OS decide (typically every ~30s) | Up to ~30s of writes | Lowest |
+>
+> **This is the whole tradeoff, in one table:** durability you can survive *vs.* write throughput. For Outline's queue, `everysec` is the right call — losing at most 1s of *enqueued* jobs on a hard crash is acceptable (a producer can re-enqueue), and you avoid `always`'s fsync-per-command cost. If you run Redis as a *durable-of-record* store where 1s of loss is *not* acceptable, use `always` and accept the throughput hit. **Naming the knob and its number ("`everysec` risks up to 1 second") is the senior detail; "enable AOF" alone is not.**
+
 > **Failure mode — unprocessed jobs on crash.** Without AOF, a Redis restart loses all queued tasks. Workers wake up to find nothing; producers see jobs "done" that never ran. **For a queue, AOF is not optional.** For Outline, use `appendonly yes`.
 
 ---

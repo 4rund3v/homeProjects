@@ -34,7 +34,18 @@ A senior designs *forward*, not to the diagram:
 
 ### The estimates you'll actually do for Outline
 
-- **Scale:** a homelab knowledge base is *small*. Maybe 10 users, a few hundred docs, attachments a few MB each. The interesting thing: **you're deliberately *over*-building** (3-node cluster, HA Postgres, service mesh, DR) to *learn* the patterns. A senior reading your design says: "the scale doesn't need this; the *learning objectives* do. Say that out loud — that's the honest framing." You wouldn't run a 3-node etcd quorum for 3 users in production; you run it here because you're buying the lesson cheaply. **Naming that tradeoff is itself the L6 move.**
+**Back-of-envelope arithmetic (the kind a panel will ask you to do on the whiteboard):**
+
+Assume: 10 active users, 8h workday, 200 documents edited/created per day in aggregate, each doc ~5KB text + 2MB of attachments on average, one search request every ~30s of active time.
+
+- **Requests:** ~200 edits × ~5 API calls each (save, autosave, list, read, search) = **1,000–5,000 requests/day** ⇒ ~10 req/day avg, peaked at ~3 RPS at morning.
+- **Data written:** 200 × (5KB + 2MB) ≈ **400 MB/day** (attachments dominate; text is noise).
+- **Storage growth:** 400 MB/day × 30 = ~12 GB/month ⇒ 150 GB/year.
+- **RAM steady-state:** Postgres 2–4 GB, Redis 1 GB, Outline server+worker 2 GB, MinIO ~1 GB per node ⇒ ~8 GB across 3 nodes (2.4 GB/node).
+
+The *design* takeaway: **even a 100× version of this scale (1,000 users, 40 GB/day, 4 TB/yr) is still a single Postgres instance's territory.** You'd need ~10,000× before sharding is forced by write volume, and you'd hit the *isolation* threshold (multi-tenancy needing hard separation) far earlier.
+
+> **The honest framing** — you're *deliberately over-building* (3-node cluster, HA Postgres, service mesh, DR) to *learn the patterns*. A senior reading your design says: "The scale doesn't need this; the *learning objectives* do. I'm buying the lesson cheaply." **Name that tradeoff out loud** — it's the L6 move.
 
 ---
 
@@ -44,7 +55,16 @@ A senior designs *forward*, not to the diagram:
 
 The question you must answer for *every* piece of state: **what does the user see when a partition happens?**
 
-- **CAP, honest version:** you can pick at most two of Consistency, Availability, Partition-tolerance — *and partitions always happen on a network*, so the real choice is **CP vs. AP** (you'll partition; the question is what you give up when you do).
+- **CAP, honest version:** you can pick at most two of Consistency, Availability, Partition-tolerance — *and partitions always happen on a network* (packet loss, a down switch, a bad NAT, a split in a WAN link), so the real choice is **CP vs. AP** (you'll partition; the question is what you give up when you do).
+
+> **The math behind CAP (the thing a panel will derive, not recite):** a quorum of N replicas can only *commit* a write when it lands on `⌈N/2⌉ + 1` of them. That's the minimum that can't split into two independent quorums — the classic *pigeonhole* guarantee. So:
+>
+> - N = 1: quorum 1. No HA at all; a single node death = full outage.
+> - N = 2: quorum 2. **Worse than N = 1** — either node dying kills writes; you lose HA and add a network peer. This is why 2 is never a quorum size.
+> - N = 3: quorum 2. Survives *one* node loss. The minimum sensible HA configuration.
+> - N = 5: quorum 3. Survives *two*. Diminishing returns on fault tolerance; you pay more quorum traffic per write.
+>
+> **The CP consequence under partition:** if your 3-replica cluster partitions into 1 + 2, the majority (2) can still commit writes; the minority (1) *cannot* — it stalls. **That stall is CP.** If instead you let the minority commit, you'd get two diverged "last wins" on rejoin — that's AP, and you've chosen to *lose* consistency to preserve availability. **You can't have both across the split; the quorum size is exactly what forces the choice.**
 - **Consistency model is a spectrum**, not a binary:
   - **Strong / linearizable** (Postgres single-writer, etcd): every reader sees the latest write. Expensive; you pay in latency and availability under partition.
   - **Eventual** (dynamo-style, Redis replicas after failover, DNS): reads may lag. Fast, available under partition.
@@ -132,6 +152,75 @@ Condition to revisit: if CNPG maintenance becomes a disproportionate
 burden, we'd move to a managed service.
 ```
 
+The exit criteria asks for *five* ADRs. Here are the other four, as **fill-in templates** so you can pattern-match your own without starting from a blank page:
+
+```
+# ADR-0043: Use MinIO (distributed, EC:2, 4 local-PV nodes) not a plain NFS volume
+Status: Accepted
+Context: Outline attachments + all in-cluster backups must survive a
+node loss; NFS would make the whole object store go down on one host.
+Decision: MinIO in distributed mode, EC:2, 4 pods × local PVs (one per
+node), no shared backend.
+Consequences: + survives 2-of-4 node loss for both reads and writes;
++ S3 API so CNPG/Outline/backup tooling all agree on one substrate.
+Rejected: NFS (single point of failure; RWX semantics differ from S3),
+standalone MinIO (no redundancy — a single pod death = total outage
+of every backup we store there).
+Condition to revisit: if we ever need >2 simultaneous node losses
+for our data tier, we move to 6+ nodes or to a real cloud S3.
+```
+
+```
+# ADR-0044: Keycloak as the IdP, not Outline's built-in local auth
+Status: Accepted
+Context: Every "user" login needs MFA-able identity; a local password
+table adds another credential store to breach, and Outline alone
+wouldn't serve Jenkins/Harbor/Grafana with a shared login.
+Decision: Keycloak in-cluster; Outline + Jenkins + Harbor all point
+to the same realm via OIDC.
+Consequences: + one credential surface, + short-lived JWTs, +
+password/MFA lifecycle owned by a purpose-built tool.
+Rejected: Outline's local auth (no federation; another credential store),
+a public SaaS IdP (we're *owning the whole stack* — the point of the project).
+Condition to revisit: if we add 10+ apps that need SSO, we should
+consider a hosted IdP for managed patching.
+```
+
+```
+# ADR-0045: ingress-nginx over Traefik or haproxy
+Status: Accepted
+Context: We need L7 routing by host, TLS termination via cert-manager
+DNS-01 ACME, and per-service rate limits.
+Decision: ingress-nginx + cert-manager.
+Consequences: + mature controller, + cert-manager can auto-issue/renew,
++ huge docs surface, + one of the few ingress controllers that does
+per-IP/per-service rate limits via annotation.
+Rejected: Traefik (weaker ACME story at this point; the ingress
+resource shape has shifted across major versions — drift risk),
+MetalLB + raw HAProxy (less per-service control, more YAML to write
+by hand).
+Condition to revisit: if we add service-mesh routing (doc 18), we'll
+retire per-service ingress rate limits and rely on the mesh's
+traffic policy instead.
+```
+
+```
+# ADR-0046: k3s (for M2) + kubeadm (later) — not RKE2
+Status: Accepted
+Context: We need a cluster that stands up in minutes to reach the
+interesting layers (Jenkins, observability) *and* we need to actually
+learn the control plane.
+Decision: k3s first for speed; a parallel kubeadm cluster later for
+the control-plane learning pass.
+Consequences: + fast start, + minimal per-node footprint (3 nodes is
+enough), - k3s defaults (SQLite storage, embedded etcd toggle) are
+slightly off-upstream so some k8s behaviors need verification.
+Rejected: RKE2 (functionally k3s, no advantage for us), air-gapped
+kubeadm bootstrap (weeks of extra setup to get to the same day-2 state).
+Condition to revisit: if we ever run in a cloud, we'd use the
+cloud's managed control plane and stop reasoning about etcd.
+```
+
 > **The L5→L6 shift is visible right here.** An L5 writes code. An L6 writes *ADR + code*, because the ADR is how the *next* person — or the reviewer, or the promotion panel — understands **why the system is shaped the way it is.** A codebase without ADRs is a codebase that re-litigates every decision from zero. Document the decisions (doc 23 develops this further as a leadership skill).
 
 ---
@@ -148,17 +237,20 @@ For the homelab the honest line: **you can't test two regions; you *can* test th
 
 ---
 
-## The L5/L6 lens: what panels probe
+## The L5/L6 lens: what panels probe to *refute* you
 
-| Probe | Junior answer | L5/L6 answer |
+The table below is *not* "what I'd say" — it's **what a hostile panel will ask to expose that you're reciting**, and **which concrete artifact** (a number, an ADR, a measured value) proves you're not. Bring those artifacts to the interview; don't narrate them from memory.
+
+| Panel probe | The refute they're looking for | The concrete artifact that *stops* the refute |
 |---|---|---|
-| "Why this DB?" | "Postgres, it's popular." | "Strong consistency is user-visible here (read-your-writes); Postgres + CNPG gives PITR; I rejected event-sourcing/dynamo because the write volume doesn't justify it. Here's the threshold that'd change it." |
-| "What's the consistency model?" | "It's consistent." | "Per-state: Postgres linearizable, Redis eventual within failover window, search index eventual, cache read-your-writes. Here's why each is the *right* kind of consistency for that data." |
-| "What breaks if the network partitions?" | "The load balancer handles it." | "Postgres goes read-only (CP). That's correct. My design invests in *not* partitioning (NPD, node health) rather than pretending the DB survives a bad network. RTO is X, RPO is Y." |
-| "How do you scale writes?" | "Add replicas." | "Replicas scale *reads*. Writes: I don't need to shard yet; I'd sharded by tenant with per-tenant DBs, not by hash, for isolation + operational boundaries. Here's the threshold." |
-| "What's your biggest tradeoff?" | (nervous silence) | "I'm over-building for the scale because the *objective* is learning the platform patterns cheaply. In prod, I'd run a single node and one Postgres. I'm buying the lesson now and paying the ops cost for it." |
+| "Why this DB?" | Can you state *the number* at which Postgres stops being the right answer? | Your estimate (the 40 GB/day figure above) + a line: "single Postgres stays the answer up to *~10k writes/sec sustained*; beyond that I'd add read replicas and *then* look at sharding by tenant. Here's my written estimate." |
+| "What's the consistency model?" | Do you know *why* each state gets its model, not just that it does? | The per-state table *with the reject-line*: "I rejected eventual consistency on doc content because read-your-writes is user-visible; rejected strong consistency on the search index because it *adds* 200ms latency with zero user-visible correctness gain." |
+| "What breaks if the network partitions?" | Can you *derive* the quorum math or is it memorized? | Say out loud: "N=3 ⇒ quorum 2. The 1-node side *cannot* commit. I *choose* that stall because the alternative — AP with diverged commits — loses the read-your-writes invariant." |
+| "How do you scale writes?" | When does "read replicas" stop being the answer? | A written threshold: "I shard at ~500 tenants × 500 docs × active-write ratio above X, or when a *single tenant* exceeds 40% of one Postgres's write capacity. Before that, read replicas + better queries." |
+| "What's your biggest tradeoff?" | Are you aware of your *over*-building, or are you just rationalizing it? | The *named* over-build: "In prod I'd run 1 node + 1 Postgres for this scale; the reason I'm not is the *learning objective.* Here's the doc line where I state it." |
+| "Walk me through a decision." | Can you give the four-part structure *without notes* on a decision you *didn't* ADR? | Pick one off-menu (say, "why Jenkins not Argo CD as the primary author?") and narrate: decision / constraint / rejected alternative / revisit condition. |
 
-> **The meta-skill:** an L6 *narrates the tradeoff, states the constraint, names the alternative, and gives the revisit condition.* That four-part structure — **decision / constraint / rejected alternative / revisit condition** — is the single most reusable thing in this document. Use it on every decision in every design you write.
+> **The meta-skill, restated as a check:** an L6 *narrates the tradeoff, states the constraint, names the alternative, and gives the revisit condition.* That four-part structure — **decision / constraint / rejected alternative / revisit condition** — is the single most reusable thing in this document. **The *panel* is going to pick one of your non-ADR decisions and ask for the four-part structure on it.** Prepare at least three.
 
 ---
 

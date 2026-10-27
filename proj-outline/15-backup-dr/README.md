@@ -20,6 +20,8 @@ These are **business decisions**, not technical ones. For a homelab knowledge ba
 | "My team's notes live here" | 1h | 4h |
 | "This is production practice" | 15min | 1h |
 
+**How to *compute* RTO from the drill, not just "decide" it:** RTO = *sum of the time-boxed steps in your recovery path*, not the total data size. For the CNPG PITR path (the table's "production practice" RTO of 1h), decompose: bring up a restore-target cluster (~2 min), CNPG fetches the base backup from MinIO (scales with base size — measure it: a 50 GiB base at ~100 MiB/s is ~10 min), replay WAL to the target time (scales with the gap to the base — 43 min of WAL is quick, 12 h of WAL is longer), verify with a data query (~1 min). **Add those up and you get the RTO — which is why RTO must be re-measured after every retention/base-size change.** The "1h" in the table is only real if the *drill* lands under it; that's the monthly timed drill in the "restore drill" section below. A common error: quoting a RTO you've never actually measured.
+
 > **Senior lens — RPO is determined by backup *frequency*; RTO by backup *quality* (tested restore speed).** People obsess over frequency and never test restores — so their real RPO is fine but their real RTO is *unknown*, which means infinite. An untested backup is a hope, not a plan. This doc's exit criteria are mostly restore drills for exactly that reason.
 
 ---
@@ -58,9 +60,9 @@ outline writes → WAL segments (16MB files, continuous) ──archive──▶ 
 
 - **Base backup** = consistent full copy. Recovery anchor.
 - **WAL archive** = every transaction since. **This is what gives you point-in-time recovery (PITR)** — "restore to 14:32:05, right before the DROP TABLE."
-- CNPG also keeps 2 on-cluster replicas (doc 06) — but replicas protect against *node* failure, not *logical* error. A `DELETE WHERE id IS NOT NULL` replicates happily to all replicas. **Replication is not backup.** Only PITR saves you from yourself.
+- CNPG also keeps 2 on-cluster replicas (doc 06) — but replicas protect against *node* failure, not *logical* error. **A bad write *replicates* to every replica, so all copies are equally wrong.** Worked example: a stray `DELETE FROM documents;` runs on the primary, streams to the two standbys, and when the primary dies you fail over to a standby that *also* lost every document. The "HA" cluster just promoted a bad database. **Replication is not backup** — it's the *same data*, fast. Only PITR (a base backup + WAL replay *to a moment before the bad write*) saves you from your own logic.
 
-Retention: base backups for N days (14 is generous), WALs to match. CNPG's `barmanObjectStore` retention policy governs both.
+Retention: base backups for N days (14 is generous), WALs to match. CNPG's `barmanObjectStore` retention policy governs both — the spec fields are `backup.barmanObjectStore.walArchiving: { enabled: true, retentionPolicy: { global: 14d } }` and `retentionPolicyForBaseBackups: "14d"`. **Map RPO to these:** RPO ≈ how far back the *latest* base+WAL gets you; the 14d global WAL retention means you can PITR to any second within 14 days, not to a single specific instant — the older the target, the less WAL you have to replay.
 
 ### The restore drill (the only part that matters)
 
@@ -161,6 +163,8 @@ minio_bucket_objects{bucket="pg-backups"} - mirror_bucket_objects{bucket="pg-bac
 ```
 
 **Alert when backups *stop*, not when you need them.** "Last successful backup > N hours" is a page, always.
+
+> **The divergence-canary, made a number (not a vibe):** `minio_bucket_objects − mirror_bucket_objects` should sit at **0** for a healthy one-way mirror (prod → tier-2). Alert when it **exceeds, say, 20 objects sustained for 15 min** — that means the mirror stopped receiving uploads (a dead `mc mirror --watch`, a revoked bucket cred, or a network partition) while prod kept writing. The *concrete* math: at a normal write rate of ~1 backup/hour, a delta that *suddenly jumps to ≥20* is far past normal lag — it's a break, not a lag. **That jump from 0 to ≥20 is the incident:** "prod keeps writing, but the offsite copy is stale by 20 objects → my DR copy is no longer a copy."
 
 ---
 

@@ -17,11 +17,11 @@ The expense tracker is the vehicle. These are the skills — each has a dedicate
 
 | Skill | Guide | You'll be able to… |
 |-------|-------|--------------------|
-| **Architecture, patterns & system design** | [`architecture-patterns.md`](docs/architecture-patterns.md), [`design-patterns.md`](docs/design-patterns.md), [`system-design.md`](docs/system-design.md) | Choose boundaries and patterns deliberately; reason about scale, reliability, consistency, and trade-offs |
+| **Architecture, patterns & system design** | [`architecture-patterns/`](docs/architecture-patterns/), [`design-patterns/`](docs/design-patterns/), [`system-design/`](docs/system-design/) (each has a deep-dive folder + a one-page overview at the top level) | Choose boundaries and patterns deliberately; reason about scale, reliability, consistency, and trade-offs |
 | **Object-oriented principles** | [`oop-principles.md`](docs/oop-principles.md) | Apply SOLID, composition, encapsulation, and YAGNI without over-engineering |
 | **Break a problem into entities & classes** | [`domain-decomposition.md`](docs/domain-decomposition.md) | Turn a fuzzy idea into models, boundaries, and relationships you can defend |
 | **DRF + JWT + OAuth hands-on** | [`drf-jwt-guide.md`](docs/drf-jwt-guide.md) | Build, secure, and reason about authenticated REST endpoints |
-| **Postgres: basics → tuning → observability** | [`postgres-guide.md`](docs/postgres-guide.md) | Model, index, tune, and watch a real database |
+| **Postgres: basics → tuning → observability → internals** | [`postgres-guide.md`](docs/postgres-guide.md) + the deep-dive folder [`postgres/`](docs/postgres/) | Model, index, tune, watch a real DB, and understand MVCC/WAL/replication/locking under it |
 | **Records, events, cleanup, archival** | [`data-lifecycle.md`](docs/data-lifecycle.md) | Decide what lives hot, what goes cold, and when to delete |
 | **Kafka topics, retention, schemas** | [`kafka-guide.md`](docs/kafka-guide.md) + [`avro-guide.md`](docs/avro-guide.md) | Design topics, evolve schemas, and reason about delivery guarantees |
 | **Infrastructure: Terraform, k3s, Helm, edge** | [`infrastructure.md`](docs/infrastructure.md) | Provision and deploy the whole thing reproducibly |
@@ -65,10 +65,10 @@ Read in this order the first time:
 2. [`domain-decomposition.md`](docs/domain-decomposition.md) — **start here**: turning the idea into entities & classes
 3. [`phases.md`](docs/phases.md) — what you build, in what order
 4. [`architecture.md`](docs/architecture.md) — how the system fits together
-5. [`architecture-patterns.md`](docs/architecture-patterns.md) — layered, clean/hexagonal, DDD, event-driven, CQRS, and resilience patterns
+5. [`architecture-patterns/`](docs/architecture-patterns/) — architecture deep-dive (layered, hexagonal, DDD-strategic, event-driven, resilience) + the one-page [`architecture-patterns.md`](docs/architecture-patterns.md)
 6. [`oop-principles.md`](docs/oop-principles.md) — SOLID, composition, encapsulation, and practical OO judgment
-7. [`design-patterns.md`](docs/design-patterns.md) — creational, structural, behavioral, and domain patterns
-8. [`system-design.md`](docs/system-design.md) — scale, reliability, consistency, availability, latency, and back-pressure
+7. [`design-patterns/`](docs/design-patterns/) — pattern deep-dive (DDD-tactical, creational, structural, behavioral, reliability) + the one-page [`design-patterns.md`](docs/design-patterns.md)
+8. [`system-design/`](docs/system-design/) — system-design deep-dive (scalability, reliability, consistency/CAP-PACELC, latency, the design worksheet) + the one-page [`system-design.md`](docs/system-design.md)
 9. [`end-to-end-flow.md`](docs/end-to-end-flow.md) — **the whole system in one walkthrough**: one expense traced through every component, with the failure matrix
 10. [`project-structure-guide.md`](docs/project-structure-guide.md) — how to decide and evolve the repo layout; no tree is prescribed
 11. [`drf-jwt-guide.md`](docs/drf-jwt-guide.md) — DRF, authentication, JWT/OAuth hands-on

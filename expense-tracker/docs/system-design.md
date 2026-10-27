@@ -1,5 +1,10 @@
 # System Design
 
+> **Deep-dive versions live in [`system-design/`](system-design/)** — one doc each for
+> scalability, reliability, consistency (CAP/PACELC), latency/throughput, and the
+> "design a system" worksheet, with worked examples and the L5/L6 framing. This file
+> is the one-page overview / index. Read the folder for depth.
+>
 > The cross-cutting concepts that sit *under* the architecture and OOP decisions:
 > **scalability, reliability, consistency, availability, latency, back-pressure, and
 > the trade-offs between them.** Each tied to a concrete choice in this project.

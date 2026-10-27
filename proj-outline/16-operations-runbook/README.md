@@ -7,7 +7,7 @@
 
 ## Teach first: day 1 vs. day 2
 
-Day 1 is *building* the platform — docs 01–14. Day 2 is *operating* it: the daily/weekly/monthly habits, the debugging sessions, the incidents, the upgrades. **Day 2 is 95% of a system's life.**
+Day 1 is *building* the platform — docs 01–14. Day 2 is *operating* it: the daily/weekly/monthly habits, the debugging sessions, the incidents, the upgrades. **Day 2 is the overwhelming majority of a system's life** — a build that takes a month typically operates for *years* — so the operational skill is where your time actually goes.
 
 The difference between a junior and a senior in operations isn't knowledge of tools — it's the presence of:
 
@@ -110,7 +110,13 @@ The rules that keep day 2 survivable:
 **Weekly (30 min):**
 - Review new/changed alerts — anything paging that shouldn't be? (doc 11's noise discipline)
 - `helm list -A` + `kubectl get deploy -A` version drift vs. repos
-- Disk trends (`predict_linear` panel — doc 13)
+- Disk trends (`predict_linear` panel — doc 13). The concrete query behind that panel:
+  ```promql
+  # "how many hours until this filesystem fills, at the rate it's been filling?"
+  predict_linear(node_filesystem_avail_bytes{mountpoint="/" }[6h], 0)
+  / deriv(node_filesystem_avail_bytes{mountpoint="/" }[6h]) * 3600
+  # < 48h → investigate/grow; < 4h → page (the "will fill overnight" call, doc 13)
+  ```
 - Harbor retention/GC ran; scan findings review (doc 05)
 - Git hygiene: anything hand-edited in the cluster that isn't in Git? (`terraform plan` empty, `helm diff` clean)
 
@@ -142,7 +148,17 @@ Order matters — upgrade the platform in dependency order, one layer at a time,
 
 > **Threshold — read the release notes for step N before step N-1.** The common upgrade disaster isn't the step you're on; it's the incompatibility two steps ahead (new CNPG needs newer k8s; new chart needs newer CRD). Map the chain first, then execute.
 >
-> **Failure mode — CRD skew.** Helm charts that bundle CRDs (prometheus-operator, CNPG, Velero) upgrade CRDs *only on install* by default — `helm upgrade` won't touch existing CRDs. You must apply CRD manifests manually before the chart that expects them. Half-upgraded CRDs produce the worst error messages in the Kubernetes ecosystem. Check every operator chart's docs for its CRD-upgrade procedure.
+> **Failure mode — CRD skew.** Helm charts that bundle CRDs (prometheus-operator, CNPG, Velero) upgrade CRDs *only on install* by default — `helm upgrade` won't touch existing CRDs. You must apply CRD manifests manually before the chart that expects them. Half-upgraded CRDs produce the worst error messages in the Kubernetes ecosystem.
+>
+> The concrete sequence when upgrading an operator chart:
+> ```
+> helm get values <old-release> -n <ns> > old-values.yaml       # capture what's live
+> helm pull <chart> --untar --version <new>                    # get the new CRDs
+> kubectl apply -f ./new-chart/crds/                            # promote CRDs FIRST
+> kubectl get crd | grep -E "cnpg|prometheus|velero"           # verify they registered
+> helm upgrade <release> <chart> -f old-values.yaml            # now the chart can assume them
+> ```
+> **The tell that you skipped the CRD step:** the chart's Pods come up and *immediately* crash with `no matches for kind "X" in version "v1"` — that error means the API server doesn't know the CRD yet, which means the CRD never got applied before the controller started. Apply the CRDs, wait for `kubectl get crd` to show them, *then* upgrade the chart. Check every operator chart's docs for its CRD-upgrade procedure — most say exactly this.
 
 ---
 

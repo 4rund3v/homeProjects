@@ -48,11 +48,53 @@ The two documents that *are* the L6 practice (doc 17's ADR, extended):
 *Record a decision and *why*, so the next person doesn't re-litigate it.* (Full template + the four-part structure in doc 17.)
 
 ### RFC / design doc
-*Get *buy-in* **before** building, across teams, by arguing the tradeoffs.* An RFC is:
+*Get *buy-in* **before** building, across teams, by arguing the tradeoffs.* A complete 1-2 page RFC (not just the section headers) is the artifact a panel will actually read — here's a filled-in one you can pattern-match:
+
 ```
-## RFC-0043: Replace Jenkins CD with GitOps for all app deploys
-Problem, Proposal, Tradeoffs (vs. Jenkins), Migration, Open Questions,
-Adoption plan (which team first, what the default becomes)
+# RFC-0043: Replace the Jenkins-push CD step with GitOps (Argo CD)
+
+Status: Proposed   Owner: <you>   Affected: Delivery, App, Data, Security
+
+## Problem
+Our CD is push: a Jenkins job runs `helm upgrade` into the cluster. That
+means (a) the cluster's live state can drift from anything in Git and
+nobody notices until a deploy; (b) the deployer is the *pipeline*, so a
+mid-deploy failure leaves a half-applied state the pipeline doesn't
+reconcile; (c) there's no *converge-to-desired* — a `kubectl edit`
+persists with no guardrail.
+
+## Proposal
+Adopt Argo CD as the in-cluster reconciler. Apps live in `gitops-apps`;
+Argo watches that repo and converges the cluster to it. The Jenkins
+pipeline keeps *building and pushing images* to Harbor; its "deploy"
+step changes from `helm upgrade` to "update the image tag in
+gitops-apps and push" — Argo does the deploy.
+
+## Tradeoffs (vs. keeping Jenkins push)
++ Reconciliation: the cluster *cannot* stay out of sync; drift reverts.
++ The pipeline stops being the deployer — it's just a Git author, so any
+  other Git author (a human, another bot) can deploy.
+− Argo CD is a new control-plane component to run and secure.
+− A bad commit can now *aggressively* converge a working cluster to a
+  broken state → we gate with health checks + a manual suspend.
+Rejected: keeping Jenkins push (the above drift + SPOF-of-the-pipeline
+problems); a bare CronJob `kubectl apply` (converges but has no
+progressive delivery / health gates / out-of-sync UX).
+
+## Migration
+1. Install Argo CD in the bootstrap repo (doc 19).  2. Move Outline +
+   add-ons into gitops-apps as Applications.  3. Cut Jenkins' CD step
+   to a tag-bump commit.  4. Run 2 weeks with both watching; verify
+   zero out-of-band edits before deleting the push path.
+
+## Open questions
+- Does the mesh (doc 18) change which namespaces Argo can manage?
+- What's the Suspend/runbook path for a bad commit?
+
+## Adoption
+First: `outline`. Default becomes: every new app ships as a gitops
+Application (not a Jenkins deploy). Leverage: N = every future
+deployment + every drift event after cutover.
 ```
 
 > **The L6 distinction: ADR = *after* the decision (record it). RFC = *before* (win agreement).** Both are **versioned, in Git, *readable by a stranger* without your help.** A system where the decisions live only in one person's head is a system that person owns alone — that's an L5 bottleneck. **The L6 move is making the *decision* portable: it survives in a doc, not in a brain.**
@@ -70,6 +112,8 @@ The concrete moves:
 4. **Protect the *defaults*** — when a new service lands, it *inherits* the secure defaults (least-privilege, mesh, SLO gate). The L6 isn't just the one-off; it's the *template the next 5 services get for free.*
 
 > **Threshold — "leverage" is measurable.** The test of an L6: *"How many other engineers' work did your decision improve?"* If the answer is "one," it's L5. The GitOps move improved *every* future deploy. The contract-test move improved *every* service boundary. The secure-default move improved *every* new service. **Count the *downstream beneficiaries*, not the *lines you wrote.***
+>
+> **How to actually count N (the method, not the vibe):** "N future services inherit it" is a *placeholder* unless you can *list them*. Concretely: N = the number of **repos/services that import your default** or **that your decision makes cheaper**. You can enumerate: `git grep` for the template/chart your new services consume; count the teams whose deploy path your GitOps change touched; count the PRs that no longer need a hand-rolled security review because the default is in place. **If N resolves to 1, you've described an L5 one-off with L6 language — and a panel will catch the inflation. If you can't produce the list, drop the "N services" framing and describe the *single* real impact you actually had.**
 
 ---
 
@@ -116,18 +160,24 @@ The L5→L6 case is **three stories, each with a *leverage* claim:**
 3. **The *Vanity metric*** — "I wrote 2,000 tests" (L5) vs. "I made the *contract* the test, so 5 teams evolve a service without breaking it" (L6, doc 22). Count *leverage*, not volume.
 4. **The *Decision trapped in a brain*** — a system whose reasoning "lives only in my head" is an L5 *risk*, not an L6 asset. Fix: the ADR/RFC (this doc + 17) makes it *portable*.
 5. **The *Default that rots*** — "secure by construction" (14) only stays true if a *new* service *inherits* it. The L6 move is the *template*, not the one application.
+6. **The *Over*-claim** — the mirror of the Vanity-metric trap: an L6 candidate who frames an N=1 outcome with "N services" language. The counter-example a panel loves to hand you: *"You said the GitOps move 'improved every future deploy,' but only the outline app actually moved onto it."* The move: **re-state the claim at the N you can actually enumerate**, and say so. Inflating is more disqualifying than under-claiming — a panel can't argue with a claim that's *credibly sized.*
 
 ---
 
-## The L5/L6 lens: what this *whole repo* signals to a panel
+## The L5/L6 lens: what a panel probes to *refute* you
 
-| Probe | L5 answer | **L6 answer (the bar this repo is built for)** |
+Not "what I'd say" — **what a hostile panel will ask to expose that the leverage is inflated**, and the concrete artifact that *stops* the refute.
+
+| Panel probe | The refute they're looking for | The concrete artifact that *stops* it |
 |---|---|---|
-| "What did you build?" | "The Outline platform, docs 01–22." | "The platform, *and* I made its *decisions into the team's defaults* — GitOps, the contract/secure defaults, the SLO-gated loop, the drilled DR. *N* future services inherit all of it." |
-| "What's the hardest call?" | "HA Postgres." | "Every *compound* choice, narrated as *decision/constraint/alternative/revisit-condition*. The four-part structure is how I'd bring it to a room." |
-| "What made you *not* just do the one-off fix?" | (a pause) | "I made the *class* of failure structurally impossible — the postmortem test: did it *change the system*?" |
-| "How did you *improve others*?" | "I wrote docs." | "The docs *are* the leverage: a stranger cold-starts the platform from them (doc 16's exit). I *reduced onboarding cost.*" |
-| "What's your biggest risk?" | "The cluster goes down." | "*Me* being the bottleneck (single-brain system). The L6 fix: GitOps self-service + runbooks so *anyone* operates it — I made the *team* capable, not just the system." |
+| "What did you *actually* build?" | "You're claiming the platform, not your slice." | The doc-01–22 build *with the dependency chain you personally owned end-to-end* — craft evidence, not a résumé bullet. |
+| "Where's the *L6* in it?" | "It's L5 craft, packaged." | Leverage claims *with N listed*: "the GitOps default now covers [named services]; the secure-default template was inherited by [named teams]; the contract-test gate is in [named CI]." Not "N future services." |
+| "What's your hardest decision?" | "You recite, not reason." | One decision narrated in the **four-part structure** off the top of your head — *including the one you'd redo.* |
+| "What did you improve in *others'* work?" | "You improved your own." | A *named* downstream: "team X's onboarding is [concrete delta] cheaper because of the runbook/ADR; team Y's deploys no longer need a hand security review because the default is in place." |
+| "What's your biggest risk?" | "You'll say 'the cluster'." | "Me being the *single brain* (an L5 bottleneck). The L6 fix is self-service + runbook + ADRs so *anyone* operates it — here's the cold-start drill I ran (doc 16's exit)." |
+| "Where's the *over*-claim in your own case?" | "You don't know when to hold back." | **The self-check you can articulate:** "Where I said 'N services' and N actually resolves to 1, I drop the multiplier and describe the single real impact. Credibly L6 on two things beats inflated-L6 on five." |
+
+> **The meta-skill, applied to the promotion case:** every leverage line must survive **"can you *list* the N?"** If you can't produce the list, that line is L5 language wearing an L6 costume — and a panel's whole job is finding that costume. **The single most disqualifying move is claiming a multiplier you can't enumerate.**
 
 ---
 

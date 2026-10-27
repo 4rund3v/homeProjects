@@ -81,6 +81,8 @@ Running a raw StatefulSet + `postgres` container is fine for learning, but it's 
 
 **CloudNativePG** (CNPG) is a Kubernetes operator that manages all of this. An **operator** is a controller that watches for a *custom resource* (in this case, a `Postgresql` CRD) and reconciles the actual Postgres cluster (StatefulSets, ConfigMaps, backups, failover) to match it.
 
+> **What "reconciles" actually means internally (the mechanism, not the name):** the operator runs a *control loop* — the same list-watch-and-act pattern as the doc-02 reconciliation loop, pointed at your CRD. Concretely, on any change to the `Postgresql` object it: (1) **list-watches** the CRD and the cluster's live state (the StatefulSet, the pods, the PVCs, the replication status), (2) **diffs** desired (your `spec`) vs. actual, (3) **mutates** the lower-level objects to close the gap — creates the StatefulSet, updates the ConfigMap, triggers a backup Job — and (4) **watches for failure** to react: when `postgres-0` dies, the loop *detects* it (the pod is gone / replication reports the primary is down), computes that a standby must be promoted, and *runs the promotion* (a CNPG-managed `promote` step) — not a human. So "CNPG does failover when `postgres-0` dies" is the operator's watch→detect→act loop, exactly like a Deployment controller rescheduling a pod except the "act" is a database promotion. If you can't narrate that loop, "operator" is just a magic word.
+
 ```yaml
 apiVersion: postgresql.cnpg.io/v1
 kind: Postgresql
@@ -146,6 +148,8 @@ app (50 conns) → PgBouncer (pool of 20) → Postgres
 | **Continuous WAL archiving** | Every transaction log shipped to object storage | Baseline; enables PITR |
 | **Base backup** | A full snapshot taken on a schedule | Recovery anchor |
 | **Point-in-time restore (PITR)** | Replay WAL to any second | When you need "undo my mistake" |
+
+> **What WAL actually is (the theory the table assumes):** Postgres writes every change to a **Write-Ahead Log** *before* committing it to the data files — small, sequential 16MB segments (`000000010000000000000001`, ...). A **base backup** is a consistent snapshot of the data files at one instant; **WAL archiving** copies each WAL segment to object storage as it's written. A **PITR restore** = take a base backup, then *replay* the archived WAL segments forward to a target time — which re-applies every committed transaction in order. That's the whole mechanism: snapshot + replay. The full worked example (CNPG `recoveryTarget`, archiving retention, the "replication is not backup" distinction) is in `15-backup-dr` — the PITR *drill* lives there, this doc teaches the *shape*.
 
 CNPG does this for you via Barman, with backups landing in your MinIO bucket (doc 08).
 
